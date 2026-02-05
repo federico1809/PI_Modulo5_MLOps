@@ -522,7 +522,7 @@ def run_ft_engineering(
     # ─────────────────────────────────────────────────────────────────────
     print("\n[3/8] Separando features y target...")
     X, y = split_features_target(df)
-    
+        
     # ─────────────────────────────────────────────────────────────────────
     # PASO 4: Validar calidad de datos
     # ─────────────────────────────────────────────────────────────────────
@@ -691,16 +691,16 @@ def inspect_preprocessor(preprocessor: ColumnTransformer,
     print("=" * 70)
 
 
-def save_preprocessor(preprocessor: ColumnTransformer, path: str = "preprocessor.pkl") -> None:
+def save_preprocessor(preprocessor, path="artifacts/preprocessor.pkl") -> None:
     """
     Guarda el preprocessor entrenado para uso posterior.
-    
-    Args:
-        preprocessor: ColumnTransformer ya ajustado
-        path: Ruta donde guardar el archivo
     """
     import joblib
+    import os
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     joblib.dump(preprocessor, path)
+
     print(f"Preprocessor guardado en: {path}")
 
 
@@ -735,7 +735,9 @@ if __name__ == "__main__":
         # Ejecutar pipeline completo
         # ─────────────────────────────────────────────────────────────────
         X_train, X_test, y_train, y_test, artifacts = run_ft_engineering()
-        
+
+        save_preprocessor(artifacts['preprocessor'])
+
         # ─────────────────────────────────────────────────────────────────
         # Resúmenes de datos
         # ─────────────────────────────────────────────────────────────────
