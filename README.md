@@ -21,3 +21,7 @@ Base_de_datos.csv
 requirements.txt
 .gitignore
 README.md
+
+### Dataset
+
+El dataset original fue entregado en formato `.xlsx`, por lo que se utiliza este formato en los notebooks en lugar de `.csv`.
