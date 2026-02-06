@@ -549,7 +549,7 @@ def run_ft_engineering(
         test_size=test_size, 
         random_state=random_state
     )
-    
+
     # ─────────────────────────────────────────────────────────────────────
     # PASO 7: Construir preprocessor
     # ─────────────────────────────────────────────────────────────────────
@@ -622,11 +622,84 @@ def run_ft_engineering(
     print("PIPELINE DE INGENIERÍA COMPLETADO EXITOSAMENTE")
     print("=" * 70)
     
+    # ─────────────────────────────────────────────────────────────────────
+    # PASO 8: Construir preprocessor
+    # ─────────────────────────────────────────────────────────────────────
+    print("\n[7/8] Construyendo preprocessor...")
+    preprocessor = build_preprocessor(numeric_cols, nominal_cols, ordinal_cols)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PASO 9: Transformar datos
+    # ─────────────────────────────────────────────────────────────────────
+    print("\n[8/8] Transformando datos...")
+        
+    # CRÍTICO: fit_transform solo en train para evitar data leakage
+    X_train_array = preprocessor.fit_transform(X_train)
+    X_test_array = preprocessor.transform(X_test)
+        
+    # Obtener nombres de columnas transformadas
+    try:
+        feature_names = preprocessor.get_feature_names_out()
+    except Exception as e:
+        warnings.warn(f"No se pudieron obtener nombres de features: {e}")
+        feature_names = [f"feature_{i}" for i in range(X_train_array.shape[1])]
+        
+    # Reconstruir DataFrames con índices originales
+    X_train_processed = pd.DataFrame(
+        X_train_array,
+        columns=feature_names,
+        index=X_train.index
+    )
+        
+    X_test_processed = pd.DataFrame(
+        X_test_array,
+        columns=feature_names,
+        index=X_test.index
+    )
+        
+    print(f"Transformación completada:")
+    print(f"  - X_train: {X_train_processed.shape}")
+    print(f"  - X_test: {X_test_processed.shape}")
+    print(f"  - Total features: {len(feature_names)}")
+        
+    # ─────────────────────────────────────────────────────────────────────
+    # Empaquetar artefactos con metadatos completos
+    # ─────────────────────────────────────────────────────────────────────
+    artifacts = {
+        "preprocessor": preprocessor,
+        "feature_names": list(feature_names),
+        "feature_types": feature_types,
+        "numeric_cols": numeric_cols,
+        "nominal_cols": nominal_cols,
+        "ordinal_cols": ordinal_cols,
+        "n_features_in": X_train.shape[1],
+        "n_features_out": X_train_processed.shape[1],
+        # Metadatos de configuración
+        "low_variation_cols": ['saldo_mora', 'saldo_mora_codeudor'],
+        "winsorizer_config": {
+            "method": "quantiles",
+            "fold": 0.05,
+            "tail": "both"
+        },
+        "split_config": {
+            "test_size": test_size,
+            "random_state": random_state,
+            "stratify": True
+        },
+        "class_balance_train": y_train.value_counts(normalize=True).to_dict(),
+        "class_balance_test": y_test.value_counts(normalize=True).to_dict()
+    }
+        
+    print("\n" + "=" * 70)
+    print("PIPELINE DE INGENIERÍA COMPLETADO EXITOSAMENTE")
+    print("=" * 70)
+        
     return X_train_processed, X_test_processed, y_train, y_test, artifacts
 
 
+
 # ═══════════════════════════════════════════════════════════════════════════
-# 9. UTILIDADES AUXILIARES
+# 10. UTILIDADES AUXILIARES
 # ═══════════════════════════════════════════════════════════════════════════
 
 def summarize_classification(X: pd.DataFrame, y: pd.Series) -> None:
@@ -721,7 +794,7 @@ def load_preprocessor(path: str = "preprocessor.pkl") -> ColumnTransformer:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 10. PUNTO DE ENTRADA PARA PRUEBAS
+# 11. PUNTO DE ENTRADA PARA PRUEBAS
 # ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
