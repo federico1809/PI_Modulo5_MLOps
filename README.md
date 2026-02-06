@@ -21,8 +21,7 @@ mlops_pipeline/
 ├── Base_de_datos.xlsx
 ├── requirements.txt
 ├── .gitignore
-├── README.md
-└── artifacts/
+└── README.md
 ```
 
 ---
