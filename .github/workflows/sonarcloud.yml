@@ -35,3 +35,5 @@ jobs:
           args: >
             -Dsonar.organization=datulito
             -Dsonar.projectKey=federico1809_PI_Modulo5_MLOps
+            -Dsonar.coverage.exclusions=**
+            -Dsonar.tests=**/*.py
