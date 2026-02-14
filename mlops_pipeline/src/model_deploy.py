@@ -21,13 +21,12 @@ import joblib
 from pathlib import Path
 import uvicorn
 import logging
-
+import os
 # ============================================================
 # LOGGING CONFIGURATION
 # ============================================================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 # ============================================================
 # PATH CONFIGURATION
 # ============================================================
@@ -35,24 +34,21 @@ SRC_DIR           = Path(__file__).resolve().parent
 ARTIFACTS_DIR     = SRC_DIR / "artifacts"
 MODEL_PATH        = ARTIFACTS_DIR / "best_model.pkl"
 PREPROCESSOR_PATH = ARTIFACTS_DIR / "preprocessor.pkl"
-
 # ============================================================
 # ARTIFACT LOADING
 # ============================================================
 def load_artifact(path: Path):
     """Safely load serialized artifact."""
     if not path.exists():
-        logger.error(f"Artifact not found: {path}")
+        logger.error("Artifact not found: %s", path)
         raise FileNotFoundError(f"Artifact not found: {path}")
     try:
         artifact = joblib.load(path)
-        logger.info(f"Artifact loaded successfully: {path.name}")
+        logger.info("Artifact loaded successfully: %s", path.name)
         return artifact
     except Exception as e:
         logger.exception("Artifact loading failed")
         raise RuntimeError(f"Failed to load artifact at {path}: {str(e)}")
-
-
 def get_expected_features(preprocessor) -> List[str]:
     """
     Obtiene la lista de features esperadas por el preprocessor.
@@ -62,7 +58,6 @@ def get_expected_features(preprocessor) -> List[str]:
     # Caso 1: ColumnTransformer de sklearn (lo mas comun)
     if hasattr(preprocessor, "feature_names_in_"):
         return list(preprocessor.feature_names_in_)
-
     # Caso 2: el preprocessor expone las columnas por transformer
     if hasattr(preprocessor, "transformers"):
         features = []
@@ -75,21 +70,17 @@ def get_expected_features(preprocessor) -> List[str]:
                 "Reconstruyendo lista desde transformers."
             )
             return features
-
     # Caso 3: no hay forma de inferirlo
     logger.warning(
         "No se pudo determinar feature_names_in_ del preprocessor. "
         "Se omitira la validacion de columnas."
     )
     return []
-
-
 # Carga unica al iniciar (best practice en produccion)
 model             = load_artifact(MODEL_PATH)
 preprocessor      = load_artifact(PREPROCESSOR_PATH)
 EXPECTED_FEATURES = get_expected_features(preprocessor)
-logger.info(f"Features esperadas por el preprocessor: {len(EXPECTED_FEATURES)}")
-
+logger.info("Features esperadas por el preprocessor: %d", len(EXPECTED_FEATURES))
 # ============================================================
 # FASTAPI INITIALIZATION
 # ============================================================
@@ -100,7 +91,6 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
-
 # ============================================================
 # EXPLICIT FEATURE SCHEMA (Swagger template)
 # ============================================================
@@ -126,7 +116,6 @@ class CreditRiskRecord(BaseModel):
     creditos_sectorReal: int           = Field(..., example=0)
     promedio_ingresos_datacredito: float = Field(..., example=82000)
     tendencia_ingresos: str            = Field(..., example="estable")
-
     # Opcion 1: enviar fecha original
     fecha_prestamo: Optional[str] = Field(
         None,
@@ -137,8 +126,6 @@ class CreditRiskRecord(BaseModel):
     fecha_prestamo_year: Optional[int]    = Field(None, example=2024)
     fecha_prestamo_month: Optional[int]   = Field(None, example=1)
     fecha_prestamo_weekday: Optional[int] = Field(None, example=0)
-
-
 # ============================================================
 # REQUEST / RESPONSE SCHEMAS
 # ============================================================
@@ -182,14 +169,11 @@ class PredictionResponse(BaseModel):
         ...,
         description="Cantidad de registros procesados"
     )
-
 # ============================================================
 # FEATURE ENGINEERING HELPERS
 # ============================================================
 DATE_COL     = "fecha_prestamo"
 DATE_DERIVED = ["fecha_prestamo_year", "fecha_prestamo_month", "fecha_prestamo_weekday"]
-
-
 def handle_date_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Si el payload incluye fecha_prestamo, deriva year/month/weekday
@@ -198,14 +182,14 @@ def handle_date_features(df: pd.DataFrame) -> pd.DataFrame:
     Si no viene ninguna, deja pasar (el preprocessor lo manejara).
     """
     df = df.copy()
-
     if DATE_COL in df.columns and df[DATE_COL].notna().any():
         df[DATE_COL] = pd.to_datetime(df[DATE_COL], dayfirst=True, errors="coerce")
         n_invalid = df[DATE_COL].isna().sum()
         if n_invalid > 0:
             logger.warning(
-                f"{n_invalid} registros tienen fecha_prestamo invalida. "
-                "Se imputaran NaN en las variables derivadas."
+                "%d registros tienen fecha_prestamo invalida. "
+                "Se imputaran NaN en las variables derivadas.",
+                n_invalid
             )
         df["fecha_prestamo_year"]    = df[DATE_COL].dt.year
         df["fecha_prestamo_month"]   = df[DATE_COL].dt.month
@@ -216,9 +200,7 @@ def handle_date_features(df: pd.DataFrame) -> pd.DataFrame:
         # Limpiar columna si vino vacia o nula
         if DATE_COL in df.columns:
             df = df.drop(columns=[DATE_COL])
-
     return df
-
 # ============================================================
 # CORE PREDICTION PIPELINE
 # ============================================================
@@ -231,13 +213,10 @@ def predict(data: List[CreditRiskRecord]) -> List[int]:
     try:
         # Convertir a lista de dicts para construir el DataFrame
         df = pd.DataFrame([record.model_dump() for record in data])
-
         if df.empty:
             raise ValueError("Input data is empty.")
-
         # --- Manejo de fecha ---
         df = handle_date_features(df)
-
         # --- Validacion de features ---
         if EXPECTED_FEATURES:
             missing = set(EXPECTED_FEATURES) - set(df.columns)
@@ -252,20 +231,16 @@ def predict(data: List[CreditRiskRecord]) -> List[int]:
                 "Validacion de features omitida (lista no disponible). "
                 "Asegurate de enviar las columnas correctas."
             )
-
         # --- Preprocesamiento ---
-        X_processed = preprocessor.transform(df)
-
+        x_processed = preprocessor.transform(df)
         # --- Prediccion ---
-        predictions = model.predict(X_processed)
+        predictions = model.predict(x_processed)
         return predictions.tolist()
-
     except ValueError:
         raise
     except Exception as e:
         logger.exception("Prediction pipeline failed")
         raise RuntimeError(f"Prediction pipeline error: {str(e)}")
-
 # ============================================================
 # ENDPOINTS
 # ============================================================
@@ -282,8 +257,6 @@ def health_check():
         "model_type": type(model).__name__,
         "api_version": "1.0.0"
     }
-
-
 @app.get(
     "/model/info",
     tags=["Monitoring"],
@@ -300,8 +273,6 @@ def model_info():
         ),
         "version": "1.0.0"
     }
-
-
 @app.post(
     "/credit-risk/predict",
     response_model=PredictionResponse,
@@ -310,7 +281,11 @@ def model_info():
     description=(
         "Predice riesgo crediticio para uno o multiples clientes. "
         "Soporta fecha_prestamo directa o variables temporales derivadas."
-    )
+    ),
+    responses={
+        400: {"description": "Datos de entrada invalidos o features faltantes"},
+        500: {"description": "Error interno en el pipeline de prediccion"}
+    }
 )
 def predict_endpoint(request: PredictionRequest):
     try:
@@ -323,14 +298,18 @@ def predict_endpoint(request: PredictionRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 # ============================================================
 # LOCAL EXECUTION ENTRYPOINT
 # ============================================================
 if __name__ == "__main__":
+    # HOST se configura via variable de entorno.
+    # Default: 127.0.0.1 (seguro para desarrollo local).
+    # En Docker/produccion, setear HOST=0.0.0.0 explicitamente.
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8000"))
     uvicorn.run(
         "model_deploy:app",
-        host="0.0.0.0",
-        port=8000,
+        host=host,
+        port=port,
         reload=False
     )

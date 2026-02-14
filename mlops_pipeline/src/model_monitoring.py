@@ -2,11 +2,9 @@
 model_monitoring.py
 Módulo responsable del monitoreo y detección de data drift para el modelo
 de predicción de comportamiento crediticio.
-
 Este script compara una población histórica (baseline) contra una población
 nueva (current) utilizando métricas estadísticas de data drift y persiste
 los resultados para su posterior visualización y análisis.
-
 MEJORAS APLICADAS:
 - Logging estructurado para trazabilidad
 - Configuración centralizada y versionable
@@ -15,25 +13,24 @@ MEJORAS APLICADAS:
 - Tests incluidos en sección final
 - INTEGRACIÓN: Preparado para usar datasets limpios de ft_engineering.py
 """
-
 from __future__ import annotations
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple, List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
-
 import pandas as pd
 import numpy as np
 from scipy.stats import ks_2samp, chi2_contingency
 from scipy.spatial.distance import jensenshannon
-
-
+# ---------------------------------------------------------------------
+# Constantes
+# ---------------------------------------------------------------------
+EMPTY_DATA_MSG = "Datos vacíos"
 # ---------------------------------------------------------------------
 # Logger configurable para trazabilidad en producción
 # ---------------------------------------------------------------------
-
 def setup_logger(
     name: str = "model_monitoring",
     level: int = logging.INFO,
@@ -82,12 +79,9 @@ def setup_logger(
     return logger
 
 logger = setup_logger()
-
-
 # ---------------------------------------------------------------------
 # Clase de configuración centralizada y serializable
 # ---------------------------------------------------------------------
-
 @dataclass
 class DriftMonitorConfig:
     """
@@ -165,12 +159,9 @@ class DriftMonitorConfig:
         with open(path, 'r') as f:
             config_dict = json.load(f)
         return cls(**config_dict)
-
-
 # ---------------------------------------------------------------------
 # 1. Carga de datos
 # ---------------------------------------------------------------------
-
 def load_raw_data(data_path: str) -> pd.DataFrame:
     """
     Carga el dataset crudo desde CSV o Excel.
@@ -208,12 +199,9 @@ def load_raw_data(data_path: str) -> pd.DataFrame:
     logger.info(f"Dataset cargado: {df.shape[0]} filas, {df.shape[1]} columnas")
     
     return df
-
-
 # ---------------------------------------------------------------------
 # 2. Preparación temporal
 # ---------------------------------------------------------------------
-
 def prepare_datetime_column(
     df: pd.DataFrame,
     datetime_col: str = "fecha_prestamo"
@@ -245,12 +233,9 @@ def prepare_datetime_column(
     logger.info(f"Dataset ordenado por {datetime_col}")
     
     return df
-
-
 # ---------------------------------------------------------------------
 # 3. Split baseline / current
 # ---------------------------------------------------------------------
-
 def split_baseline_current(
     df: pd.DataFrame,
     cutoff_date: str,
@@ -301,12 +286,9 @@ def split_baseline_current(
     )
     
     return baseline_df, current_df
-
-
 # ---------------------------------------------------------------------
 # 4. Selección de features monitoreables
 # ---------------------------------------------------------------------
-
 def select_monitoring_features(
     baseline_df: pd.DataFrame,
     current_df: pd.DataFrame,
@@ -360,12 +342,9 @@ def select_monitoring_features(
     logger.info(f"Columnas excluidas: {excluded_cols}")
     
     return baseline_features, current_features
-
-
 # ---------------------------------------------------------------------
 # 5. Identificación de tipo de variables
 # ---------------------------------------------------------------------
-
 def identify_feature_types(
     df: pd.DataFrame
 ) -> Tuple[List[str], List[str]]:
@@ -391,12 +370,9 @@ def identify_feature_types(
     )
     
     return numeric_features, categorical_features
-
-
 # ---------------------------------------------------------------------
 # 6. Métricas de data drift
 # ---------------------------------------------------------------------
-
 def ks_test_drift(
     baseline: pd.Series,
     current: pd.Series,
@@ -425,7 +401,7 @@ def ks_test_drift(
         return np.nan, warning
     
     if baseline_clean.empty or current_clean.empty:
-        return np.nan, "Datos vacíos después de eliminar NaN"
+        return np.nan, EMPTY_DATA_MSG
     
     try:
         ks_statistic, _ = ks_2samp(baseline_clean, current_clean)
@@ -433,7 +409,6 @@ def ks_test_drift(
     except Exception as e:
         logger.error(f"Error en KS test para {baseline.name}: {e}")
         return np.nan, f"Error: {str(e)}"
-
 
 def psi_drift(
     baseline: pd.Series,
@@ -457,7 +432,7 @@ def psi_drift(
         return np.nan, warning
     
     if baseline_clean.empty or current_clean.empty:
-        return np.nan, "Datos vacíos"
+        return np.nan, EMPTY_DATA_MSG
     
     # Definir bins según percentiles del baseline
     try:
@@ -492,7 +467,6 @@ def psi_drift(
     
     return psi_value, None
 
-
 def jensen_shannon_drift(
     baseline: pd.Series,
     current: pd.Series,
@@ -513,7 +487,7 @@ def jensen_shannon_drift(
         return np.nan, f"Current insuficiente: {len(current_clean)} muestras"
     
     if baseline_clean.empty or current_clean.empty:
-        return np.nan, "Datos vacíos"
+        return np.nan, EMPTY_DATA_MSG
     
     try:
         breakpoints = np.percentile(
@@ -544,7 +518,6 @@ def jensen_shannon_drift(
         logger.error(f"Error en Jensen-Shannon para {baseline.name}: {e}")
         return np.nan, f"Error: {str(e)}"
 
-
 def chi_square_drift(
     baseline: pd.Series,
     current: pd.Series,
@@ -558,7 +531,7 @@ def chi_square_drift(
     current_clean = current.dropna().astype(str)
     
     if baseline_clean.empty or current_clean.empty:
-        return np.nan, "Datos vacíos"
+        return np.nan, EMPTY_DATA_MSG
     
     categories = sorted(
         set(baseline_clean.unique()) | set(current_clean.unique())
@@ -596,12 +569,9 @@ def chi_square_drift(
     except Exception as e:
         logger.error(f"Error en chi-square para {baseline.name}: {e}")
         return np.nan, f"Error: {str(e)}"
-
-
 # ---------------------------------------------------------------------
 # 7. Orquestador de métricas por variable
 # ---------------------------------------------------------------------
-
 def compute_drift_metrics(
     baseline_df: pd.DataFrame,
     current_df: pd.DataFrame,
@@ -616,7 +586,8 @@ def compute_drift_metrics(
     )
     
     results = []
-    timestamp = datetime.utcnow().isoformat()
+    # Usar datetime con timezone explícita (reemplaza utcnow() deprecado)
+    timestamp = datetime.now(timezone.utc).isoformat()
     
     # Procesamiento de features numéricas
     logger.info(f"Calculando métricas para {len(numeric_features)} features numéricas")
@@ -648,8 +619,8 @@ def compute_drift_metrics(
         )
         
         # Consolidar advertencias
-        warnings = [w for w in [nan_warning, ks_warning, psi_warning, js_warning] if w]
-        warning_str = "; ".join(warnings) if warnings else None
+        warnings_list = [w for w in [nan_warning, ks_warning, psi_warning, js_warning] if w]
+        warning_str = "; ".join(warnings_list) if warnings_list else None
         
         results.append(
             {
@@ -689,8 +660,8 @@ def compute_drift_metrics(
             baseline_series, current_series, config.min_sample_size_chi2
         )
         
-        warnings = [w for w in [nan_warning, chi2_warning] if w]
-        warning_str = "; ".join(warnings) if warnings else None
+        warnings_list = [w for w in [nan_warning, chi2_warning] if w]
+        warning_str = "; ".join(warnings_list) if warnings_list else None
         
         results.append(
             {
@@ -711,12 +682,9 @@ def compute_drift_metrics(
     
     logger.info(f"Métricas calculadas para {len(results)} features")
     return pd.DataFrame(results)
-
-
 # ---------------------------------------------------------------------
 # 8. Persistencia de métricas
 # ---------------------------------------------------------------------
-
 def save_drift_metrics(
     metrics_df: pd.DataFrame,
     config: DriftMonitorConfig,
@@ -740,7 +708,6 @@ def save_drift_metrics(
         if not output_file.endswith('.csv'):
             output_file += '.csv'
         
-        # Agregar al archivo existente
         file_exists = os.path.exists(output_file)
         mode = 'a' if file_exists else 'w'
         header = not file_exists
@@ -763,12 +730,9 @@ def save_drift_metrics(
         config.to_json(config_file)
     
     return output_file
-
-
 # ---------------------------------------------------------------------
 # 9. Ejecución end-to-end
 # ---------------------------------------------------------------------
-
 def run_monitoring_pipeline(
     config: DriftMonitorConfig,
     append_mode: bool = False
@@ -842,21 +806,18 @@ def run_monitoring_pipeline(
     except Exception as e:
         logger.error(f"ERROR EN PIPELINE: {e}", exc_info=True)
         raise
-
-
 # ---------------------------------------------------------------------
 # 10. Tests básicos para validación
 # ---------------------------------------------------------------------
-
 def run_basic_tests():
     """
     Tests básicos para validar el funcionamiento del pipeline.
     """
     logger.info("Ejecutando tests básicos...")
     
-    # Test 1: Configuración válida
+    # Test 1: Configuración válida — se espera FileNotFoundError por archivo inexistente
     try:
-        config = DriftMonitorConfig(
+        DriftMonitorConfig(
             data_path="dummy.csv",
             output_metrics_path="output.csv",
             cutoff_date="2025-01-01"
@@ -864,9 +825,9 @@ def run_basic_tests():
     except FileNotFoundError:
         logger.info("Test 1 pasado: Validación de archivo inexistente")
     
-    # Test 2: Configuración inválida
+    # Test 2: Configuración inválida — se espera error por fecha inválida
     try:
-        config = DriftMonitorConfig(
+        DriftMonitorConfig(
             data_path="dummy.csv",
             output_metrics_path="output.csv",
             cutoff_date="invalid-date"
@@ -876,46 +837,44 @@ def run_basic_tests():
         logger.info("Test 2 pasado: Detectó fecha inválida")
     
     # Test 3: Métricas con datos sintéticos
-    np.random.seed(42)
-    baseline_data = pd.Series(np.random.normal(0, 1, 100), name="test_feature")
-    current_data = pd.Series(np.random.normal(0.5, 1, 100), name="test_feature")
+    # Usar numpy.random.Generator (reemplaza las funciones legacy de numpy.random)
+    rng = np.random.default_rng(seed=42)
+    baseline_data = pd.Series(rng.normal(0, 1, 100), name="test_feature")
+    current_data  = pd.Series(rng.normal(0.5, 1, 100), name="test_feature")
     
     ks_stat, _ = ks_test_drift(baseline_data, current_data, min_sample_size=30)
     if not np.isnan(ks_stat) and 0 <= ks_stat <= 1:
-        logger.info(f"Test 3 pasado: KS stat = {ks_stat:.4f}")
+        logger.info("Test 3 pasado: KS stat = %.4f", ks_stat)
     else:
         logger.error("Test 3 fallado: KS stat inválido")
     
     # Test 4: PSI con datos sintéticos
     psi_value, _ = psi_drift(baseline_data, current_data, bins=10, min_sample_size=30)
     if not np.isnan(psi_value):
-        logger.info(f"Test 4 pasado: PSI = {psi_value:.4f}")
+        logger.info("Test 4 pasado: PSI = %.4f", psi_value)
     else:
         logger.error("Test 4 fallado: PSI inválido")
     
     # Test 5: Chi-square con datos categóricos
     baseline_cat = pd.Series(['A'] * 40 + ['B'] * 30 + ['C'] * 30, name="test_cat")
-    current_cat = pd.Series(['A'] * 30 + ['B'] * 40 + ['C'] * 30, name="test_cat")
+    current_cat  = pd.Series(['A'] * 30 + ['B'] * 40 + ['C'] * 30, name="test_cat")
     
     chi2_stat, _ = chi_square_drift(baseline_cat, current_cat, min_sample_per_category=5)
     if not np.isnan(chi2_stat) and chi2_stat >= 0:
-        logger.info(f"Test 5 pasado: Chi-square = {chi2_stat:.4f}")
+        logger.info("Test 5 pasado: Chi-square = %.4f", chi2_stat)
     else:
         logger.error("Test 5 fallado: Chi-square inválido")
     
     logger.info("Tests básicos completados")
-
-
 # ---------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------
-
 if __name__ == "__main__":
     # Opción 1: Ejecutar tests
     # run_basic_tests()
     
     # Opción 2: Ejecutar pipeline con dataset limpio de ft_engineering.py
-    config = DriftMonitorConfig(
+    monitoring_config = DriftMonitorConfig(
         # IMPORTANTE: Usar el dataset limpio generado por build_monitoring_dataset()
         data_path="./Base_de_datos_monitoring.csv",
         output_metrics_path="artifacts/data_drift_metrics.csv",
@@ -933,10 +892,10 @@ if __name__ == "__main__":
     
     # Ejecutar pipeline
     metrics_df, output_file = run_monitoring_pipeline(
-        config=config,
+        config=monitoring_config,
         append_mode=True  # True para mantener histórico en un solo CSV
     )
     
-    print(f"\nPipeline completado")
-    print(f"Métricas guardadas en: {output_file}")
-    print(f"Configuración guardada en: {output_file.replace('.csv', '_config.json')}")
+    print("\nPipeline completado")
+    print("Métricas guardadas en: " + output_file)
+    print("Configuración guardada en: " + output_file.replace('.csv', '_config.json'))

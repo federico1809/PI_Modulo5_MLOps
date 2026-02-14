@@ -1,10 +1,8 @@
 """
 Pipeline de Ingeniería de Características - Proyecto MLOps
 Versión: 1.1.1
-
 Este módulo implementa el pipeline completo de transformación de features
 para el modelo predictivo de comportamiento crediticio.
-
 Responsabilidades:
 - Carga de datos crudos
 - Validación de calidad de datos
@@ -14,81 +12,80 @@ Responsabilidades:
 - Generación de datasets procesados listos para modelamiento
 - Exportación de datos para monitoreo de drift
 """
-
 import os
 import pandas as pd
 import numpy as np
 from typing import Dict, Tuple, Optional, List
 import warnings
-
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import RobustScaler, OneHotEncoder, OrdinalEncoder
-
 from feature_engine.imputation import MeanMedianImputer
 from feature_engine.outliers import Winsorizer
-
 warnings.filterwarnings('ignore')
-
-
 # ===============================================================================
 # 1. CARGA DE DATOS
 # ===============================================================================
+def _resolve_default_path(ruta_proyecto: str, prefer: str) -> str:
+    """
+    Resuelve la ruta por defecto según el formato preferido.
+    Extrae lógica de selección para reducir complejidad de load_data.
+    """
+    path_xlsx = os.path.join(ruta_proyecto, "Base_de_datos.xlsx")
+    path_csv  = os.path.join(ruta_proyecto, "Base_de_datos.csv")
+
+    if prefer == "xlsx":
+        return path_xlsx if os.path.exists(path_xlsx) else path_csv
+    return path_csv if os.path.exists(path_csv) else path_xlsx
+
+
+def _load_by_extension(path: str) -> pd.DataFrame:
+    """
+    Carga el archivo según su extensión.
+    Extrae lógica de lectura para reducir complejidad de load_data.
+    """
+    file_extension = os.path.splitext(path)[1].lower()
+    if file_extension in ['.xlsx', '.xls']:
+        return pd.read_excel(path)
+    if file_extension == '.csv':
+        return pd.read_csv(path)
+    raise ValueError(
+        "Formato no soportado: %s. Use .xlsx, .xls o .csv" % file_extension
+    )
+
 
 def load_data(path: Optional[str] = None, prefer: str = "xlsx") -> pd.DataFrame:
     """
     Carga el dataset desde archivo CSV o Excel.
-
     Si no se proporciona ruta, busca Base_de_datos.xlsx/csv en el directorio raíz del proyecto.
     Parsea automáticamente la columna de fecha.
-
     Args:
         path:   Ruta al archivo. Si es None, usa ubicación por defecto.
         prefer: Formato preferido cuando ambos archivos existen ('xlsx' o 'csv').
                 - 'xlsx': prioriza el Excel crudo (usado por run_ft_engineering).
                 - 'csv' : prioriza el CSV procesado (usado por monitoring).
-
     Returns:
         DataFrame con los datos cargados y fecha parseada.
-
     Raises:
         FileNotFoundError: Si el archivo no existe.
         ValueError: Si el formato no es soportado.
     """
     if path is None:
-        ruta_actual = os.path.dirname(os.path.abspath(__file__))
+        ruta_actual   = os.path.dirname(os.path.abspath(__file__))
         ruta_proyecto = os.path.dirname(ruta_actual)
-
-        path_xlsx = os.path.join(ruta_proyecto, "Base_de_datos.xlsx")
-        path_csv  = os.path.join(ruta_proyecto, "Base_de_datos.csv")
-
-        if prefer == "xlsx":
-            path = path_xlsx if os.path.exists(path_xlsx) else path_csv
-        else:
-            path = path_csv if os.path.exists(path_csv) else path_xlsx
-
+        path          = _resolve_default_path(ruta_proyecto, prefer)
         if not os.path.exists(path):
             raise FileNotFoundError(
-                f"No se encontró Base_de_datos.xlsx ni .csv en: {ruta_proyecto}"
+                "No se encontró Base_de_datos.xlsx ni .csv en: %s" % ruta_proyecto
             )
 
-    # Validar existencia
     if not os.path.exists(path):
-        raise FileNotFoundError(f"Archivo no encontrado: {path}")
+        raise FileNotFoundError("Archivo no encontrado: %s" % path)
 
-    # Cargar según extensión
-    file_extension = os.path.splitext(path)[1].lower()
+    df = _load_by_extension(path)
 
-    if file_extension in ['.xlsx', '.xls']:
-        df = pd.read_excel(path)
-    elif file_extension == '.csv':
-        df = pd.read_csv(path)
-    else:
-        raise ValueError(f"Formato no soportado: {file_extension}. Use .xlsx, .xls o .csv")
-
-    # Parsear fecha si existe
     if "fecha_prestamo" in df.columns:
         df["fecha_prestamo"] = pd.to_datetime(
             df["fecha_prestamo"],
@@ -96,14 +93,13 @@ def load_data(path: Optional[str] = None, prefer: str = "xlsx") -> pd.DataFrame:
             errors="coerce"
         )
 
-    print(f"Datos cargados exitosamente: {df.shape[0]} filas, {df.shape[1]} columnas")
+    print("Datos cargados exitosamente: %d filas, %d columnas" % (df.shape[0], df.shape[1]))
     return df
 
 
 # ===============================================================================
 # 2. INGENIERÍA DE VARIABLES TEMPORALES
 # ===============================================================================
-
 def generate_date_features(
     df: pd.DataFrame,
     date_col: str = "fecha_prestamo",
@@ -111,21 +107,18 @@ def generate_date_features(
 ) -> pd.DataFrame:
     """
     Deriva variables numéricas a partir de fecha_prestamo.
-
     Args:
         df: DataFrame con la columna de fecha
         date_col: Nombre de la columna temporal
         drop_original: Si True elimina la columna original.
                        Si False la conserva (recomendado para monitoring).
-
     Returns:
         DataFrame con variables derivadas.
     """
     df = df.copy()
-
     if date_col not in df.columns:
         warnings.warn(
-            f"Columna '{date_col}' no encontrada. Se omite transformación temporal."
+            "Columna '%s' no encontrada. Se omite transformación temporal." % date_col
         )
         return df
 
@@ -137,60 +130,51 @@ def generate_date_features(
         df = df.drop(columns=[date_col])
 
     print("Variables temporales generadas: year, month, weekday")
-    print(f"Columna original conservada: {not drop_original}")
-
+    print("Columna original conservada: %s" % (not drop_original))
     return df
 
 
 # ===============================================================================
 # 3. SEPARACIÓN DE FEATURES Y TARGET
 # ===============================================================================
-
 def split_features_target(
     df: pd.DataFrame,
     target_col: str = "Pago_atiempo"
 ) -> Tuple[pd.DataFrame, pd.Series]:
     """
     Separa features (X) y variable objetivo (y).
-
     Args:
         df: DataFrame completo
         target_col: Nombre de la columna objetivo
-
     Returns:
         Tupla (X, y) donde X son las features y y es el target
-
     Raises:
         ValueError: Si la columna objetivo no existe
     """
     if target_col not in df.columns:
         raise ValueError(
-            f"Columna objetivo '{target_col}' no encontrada. "
-            f"Columnas disponibles: {df.columns.tolist()}"
+            "Columna objetivo '%s' no encontrada. "
+            "Columnas disponibles: %s" % (target_col, df.columns.tolist())
         )
 
     y = df[target_col].copy()
     X = df.drop(columns=[target_col]).copy()
 
-    print(f"Features (X): {X.shape[1]} columnas")
-    print(f"Target (y): '{target_col}' - Balance: {y.value_counts().to_dict()}")
-
+    print("Features (X): %d columnas" % X.shape[1])
+    print("Target (y): '%s' - Balance: %s" % (target_col, y.value_counts().to_dict()))
     return X, y
 
 
 # ===============================================================================
 # 4. VALIDACIÓN DE CALIDAD DE DATOS
 # ===============================================================================
-
 def validate_data_quality(X: pd.DataFrame, y: pd.Series) -> None:
     """
     Valida la calidad de los datos antes del procesamiento.
-
     Genera warnings para:
     - Valores nulos excesivos (>50%)
     - Columnas con varianza cero
     - Desbalanceo extremo en el target (>95%)
-
     Args:
         X: Features
         y: Target
@@ -198,11 +182,11 @@ def validate_data_quality(X: pd.DataFrame, y: pd.Series) -> None:
     print("\nValidando calidad de datos...")
 
     # 1. Revisar nulos
-    missing_pct = (X.isnull().sum() / len(X)) * 100
+    missing_pct  = (X.isnull().sum() / len(X)) * 100
     high_missing = missing_pct[missing_pct > 50]
     if not high_missing.empty:
         warnings.warn(
-            f"Columnas con >50% de valores nulos:\n{high_missing.to_dict()}"
+            "Columnas con >50%% de valores nulos:\n%s" % high_missing.to_dict()
         )
 
     # 2. Revisar varianza cero
@@ -210,16 +194,17 @@ def validate_data_quality(X: pd.DataFrame, y: pd.Series) -> None:
     zero_var = X[numeric_cols_check].nunique() == 1
     if zero_var.any():
         warnings.warn(
-            f"Columnas con varianza cero (considerar eliminar): "
-            f"{zero_var[zero_var].index.tolist()}"
+            "Columnas con varianza cero (considerar eliminar): %s"
+            % zero_var[zero_var].index.tolist()
         )
 
     # 3. Revisar desbalanceo
     class_balance = y.value_counts(normalize=True)
     if class_balance.max() > 0.95:
         warnings.warn(
-            f"Desbalanceo significativo detectado: {class_balance.to_dict()}\n"
-            f"Considerar técnicas de balanceo en entrenamiento (SMOTE, class_weight, etc.)."
+            "Desbalanceo significativo detectado: %s\n"
+            "Considerar técnicas de balanceo en entrenamiento (SMOTE, class_weight, etc.)."
+            % class_balance.to_dict()
         )
 
     print("Validación completada")
@@ -228,14 +213,11 @@ def validate_data_quality(X: pd.DataFrame, y: pd.Series) -> None:
 # ===============================================================================
 # 5. DEFINICIÓN DE TIPOS DE VARIABLES
 # ===============================================================================
-
 def define_feature_types() -> Dict[str, List[str]]:
     """
     Define la clasificación de variables según su tipo semántico.
-
     Esta clasificación es estática y se basa en el diseño del proyecto.
     Incluye las variables derivadas de fecha.
-
     Returns:
         Diccionario con listas de columnas por tipo:
         - numeric: Variables numéricas (continuas y discretas) + derivadas de fecha
@@ -285,41 +267,33 @@ def validate_and_filter_features(
 ) -> Dict[str, List[str]]:
     """
     Filtra las listas de features para incluir solo columnas existentes en X.
-
     Emite warnings para columnas esperadas pero ausentes.
-
     Args:
         X: DataFrame de features
         feature_types: Diccionario con tipos de features (salida de define_feature_types)
-
     Returns:
         Diccionario con listas filtradas de columnas existentes
     """
     filtered_types = {}
-
     for var_type, cols in feature_types.items():
         existing_cols = [col for col in cols if col in X.columns]
         missing_cols  = [col for col in cols if col not in X.columns]
-
         if missing_cols:
             warnings.warn(
-                f"Columnas {var_type} ausentes en el dataset: {missing_cols}"
+                "Columnas %s ausentes en el dataset: %s" % (var_type, missing_cols)
             )
-
         filtered_types[var_type] = existing_cols
 
-    print(f"Features validadas:")
-    print(f"  - Numéricas: {len(filtered_types['numeric'])}")
-    print(f"  - Nominales: {len(filtered_types['nominal'])}")
-    print(f"  - Ordinales: {len(filtered_types['ordinal'])}")
-
+    print("Features validadas:")
+    print("  - Numéricas: %d" % len(filtered_types['numeric']))
+    print("  - Nominales: %d" % len(filtered_types['nominal']))
+    print("  - Ordinales: %d" % len(filtered_types['ordinal']))
     return filtered_types
 
 
 # ===============================================================================
 # 6. CONSTRUCCIÓN DEL PREPROCESSOR
 # ===============================================================================
-
 def build_preprocessor(
     numeric_cols: List[str],
     nominal_cols: List[str],
@@ -327,27 +301,22 @@ def build_preprocessor(
 ) -> ColumnTransformer:
     """
     Construye el ColumnTransformer con pipelines específicos por tipo de variable.
-
     LÓGICA DE DISEÑO:
     - Se excluyen variables con alta concentración de ceros (>95%) del Winsorizer
       debido a colapso de cuantiles.
     - Se utiliza RobustScaler para mitigar impacto de outliers sin perder
       señal de riesgo crediticio.
-
     PIPELINES:
     1. NUMERIC: Imputación -> Winsorización (selectiva) -> Escalado
     2. ORDINAL: Imputación -> Encoding -> Escalado
     3. NOMINAL: Imputación -> OneHotEncoding
-
     Args:
         numeric_cols: Lista de columnas numéricas
         nominal_cols: Lista de columnas categóricas nominales
         ordinal_cols: Lista de columnas categóricas ordinales
-
     Returns:
         ColumnTransformer configurado y listo para fit/transform
     """
-
     # Variables con baja varianza (alta concentración de ceros)
     low_variation_cols = ['saldo_mora', 'saldo_mora_codeudor']
 
@@ -371,7 +340,6 @@ def build_preprocessor(
 
     # Pipeline Ordinal
     ordinal_mapping = [["Decreciente", "Estable", "Creciente"]]
-
     ordinal_pipeline = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
         ("encoder", OrdinalEncoder(
@@ -403,20 +371,18 @@ def build_preprocessor(
         verbose_feature_names_out=True
     )
 
-    print(f"Preprocessor construido:")
-    print(f"  - Pipeline numérico: {len(numeric_cols)} columnas")
-    print(f"    * Con Winsorizer: {len(cols_to_winsorize)}")
-    print(f"    * Sin Winsorizer: {len(low_variation_cols)} ({low_variation_cols})")
-    print(f"  - Pipeline ordinal: {len(ordinal_cols)} columnas")
-    print(f"  - Pipeline nominal: {len(nominal_cols)} columnas")
-
+    print("Preprocessor construido:")
+    print("  - Pipeline numérico: %d columnas" % len(numeric_cols))
+    print("    * Con Winsorizer: %d" % len(cols_to_winsorize))
+    print("    * Sin Winsorizer: %d (%s)" % (len(low_variation_cols), low_variation_cols))
+    print("  - Pipeline ordinal: %d columnas" % len(ordinal_cols))
+    print("  - Pipeline nominal: %d columnas" % len(nominal_cols))
     return preprocessor
 
 
 # ===============================================================================
 # 7. SPLIT TRAIN/TEST
 # ===============================================================================
-
 def split_train_test(
     X: pd.DataFrame,
     y: pd.Series,
@@ -425,15 +391,12 @@ def split_train_test(
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     """
     Divide los datos en conjuntos de entrenamiento y prueba.
-
     Utiliza estratificación para mantener la proporción de clases.
-
     Args:
         X: Features
         y: Target
         test_size: Proporción del conjunto de prueba (default: 0.2 = 20%)
         random_state: Semilla para reproducibilidad
-
     Returns:
         Tupla (X_train, X_test, y_train, y_test)
     """
@@ -444,34 +407,29 @@ def split_train_test(
         stratify=y
     )
 
-    print(f"Split completado:")
-    print(f"  - Train: {X_train.shape[0]} filas ({(1-test_size)*100:.0f}%)")
-    print(f"  - Test: {X_test.shape[0]} filas ({test_size*100:.0f}%)")
-    print(f"  - Balance train: {y_train.value_counts(normalize=True).round(3).to_dict()}")
-    print(f"  - Balance test: {y_test.value_counts(normalize=True).round(3).to_dict()}")
-
+    print("Split completado:")
+    print("  - Train: %d filas (%.0f%%)" % (X_train.shape[0], (1 - test_size) * 100))
+    print("  - Test: %d filas (%.0f%%)" % (X_test.shape[0], test_size * 100))
+    print("  - Balance train: %s" % y_train.value_counts(normalize=True).round(3).to_dict())
+    print("  - Balance test: %s" % y_test.value_counts(normalize=True).round(3).to_dict())
     return X_train, X_test, y_train, y_test
 
 
 # ===============================================================================
 # 8. DATASET ESTRUCTURAL PARA MONITOREO (SIN TRANSFORMACIONES DE MODELADO)
 # ===============================================================================
-
 def get_structural_dataset(data_path: Optional[str] = None) -> Tuple[pd.DataFrame, pd.Series]:
     """
     Devuelve dataset limpio estructuralmente pero SIN transformaciones
     de modelado (sin scaler, sin encoding, sin winsorization).
-
     Ideal para drift monitoring, ya que mantiene los valores originales
     después de las transformaciones estructurales básicas.
-
     Args:
         data_path: Ruta al archivo de datos (None = ubicación por defecto)
-
     Returns:
         Tupla (X, y) con datos estructuralmente limpios pero sin transformaciones
     """
-    df = load_data(data_path, prefer="csv")       # CSV procesado por ft_engineering
+    df = load_data(data_path, prefer="csv")
     df = generate_date_features(df, drop_original=True)
     X, y = split_features_target(df)
     return X, y
@@ -485,71 +443,56 @@ def build_monitoring_dataset(
 ) -> pd.DataFrame:
     """
     Genera dataset estructural para monitoreo de drift.
-
     FUNCIÓN RECOMENDADA para generar datasets de monitoreo.
-
     Características:
     - Conserva fecha_prestamo original (opcional)
     - Genera variables temporales derivadas
     - No aplica transformaciones de modelado
     - Parametrizable (no hardcodea nombres)
     - Exporta CSV listo para model_monitoring
-
     Args:
         data_path: Ruta al dataset fuente (None = default)
         output_path: Ruta del CSV final
         target_col: Nombre de la columna target
         keep_date: Si True, conserva fecha_prestamo original
-
     Returns:
         DataFrame con el dataset generado (también guardado en CSV)
     """
-
     print("\n" + "=" * 70)
     print("GENERANDO DATASET BASE PARA MONITOREO")
     print("=" * 70)
 
-    # 1. Cargar datos — CSV procesado por ft_engineering
     df = load_data(data_path, prefer="csv")
-
-    # 2. Generar variables temporales
     df = generate_date_features(
         df,
         date_col="fecha_prestamo",
         drop_original=not keep_date
     )
 
-    # 3. Validar existencia del target
     if target_col not in df.columns:
         raise ValueError(
-            f"Columna target '{target_col}' no encontrada. "
-            f"Columnas disponibles: {df.columns.tolist()}"
+            "Columna target '%s' no encontrada. "
+            "Columnas disponibles: %s" % (target_col, df.columns.tolist())
         )
 
-    # 4. Separar X e y
     X, y = split_features_target(df, target_col=target_col)
 
-    # 5. Reconstruir dataset final
     df_export = X.copy()
     df_export[y.name] = y
 
-    # 6. Exportar CSV base
     df_export.to_csv(output_path, index=False)
-
-    print(f"\nDataset exportado correctamente en: {output_path}")
-    print(f"Dimensiones: {df_export.shape[0]} filas x {df_export.shape[1]} columnas")
+    print("\nDataset exportado correctamente en: %s" % output_path)
+    print("Dimensiones: %d filas x %d columnas" % (df_export.shape[0], df_export.shape[1]))
     if keep_date:
-        print(f"Fecha incluida: {'fecha_prestamo' in df_export.columns}")
-    print(f"Target incluido: {y.name}")
+        print("Fecha incluida: %s" % ("fecha_prestamo" in df_export.columns))
+    print("Target incluido: %s" % y.name)
     print("=" * 70)
-
     return df_export
 
 
 # ===============================================================================
 # 9. FUNCIÓN ORQUESTADORA PRINCIPAL
 # ===============================================================================
-
 def run_ft_engineering(
     data_path: Optional[str] = None,
     test_size: float = 0.2,
@@ -557,7 +500,6 @@ def run_ft_engineering(
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, Dict]:
     """
     FUNCIÓN PRINCIPAL: Ejecuta el pipeline completo de ingeniería de características.
-
     FLUJO:
     1. Carga de datos
     2. Derivación de variables temporales
@@ -568,22 +510,19 @@ def run_ft_engineering(
     7. Construcción del preprocessor
     8. Transformación de datos (fit en train, transform en test)
     9. Reconstrucción de DataFrames con nombres de columnas
-
     Args:
         data_path: Ruta al archivo de datos (None = ubicación por defecto)
         test_size: Proporción del conjunto de prueba
         random_state: Semilla para reproducibilidad
-
     Returns:
         Tupla con:
-        - X_train_processed: DataFrame de features de entrenamiento transformadas
-        - X_test_processed: DataFrame de features de prueba transformadas
+        - x_train_processed: DataFrame de features de entrenamiento transformadas
+        - x_test_processed: DataFrame de features de prueba transformadas
         - y_train: Target de entrenamiento
         - y_test: Target de prueba
         - artifacts: Diccionario con preprocessor y metadatos completos
-
     Ejemplo:
-        >>> X_train, X_test, y_train, y_test, artifacts = run_ft_engineering()
+        >>> x_train, x_test, y_train, y_test, artifacts = run_ft_engineering()
         >>> preprocessor = artifacts['preprocessor']
         >>> feature_names = artifacts['feature_names']
     """
@@ -611,10 +550,9 @@ def run_ft_engineering(
     print("\n[5/8] Definiendo tipos de variables...")
     feature_types = define_feature_types()
     feature_types = validate_and_filter_features(X, feature_types)
-
-    numeric_cols = feature_types["numeric"]
-    nominal_cols = feature_types["nominal"]
-    ordinal_cols = feature_types["ordinal"]
+    numeric_cols  = feature_types["numeric"]
+    nominal_cols  = feature_types["nominal"]
+    ordinal_cols  = feature_types["ordinal"]
 
     # PASO 6: Split train/test
     print("\n[6/8] Dividiendo datos en train/test...")
@@ -630,35 +568,33 @@ def run_ft_engineering(
 
     # PASO 8: Transformar datos
     print("\n[8/8] Transformando datos...")
-
     # CRÍTICO: fit_transform solo en train para evitar data leakage
-    X_train_array = preprocessor.fit_transform(X_train)
-    X_test_array  = preprocessor.transform(X_test)
+    x_train_array = preprocessor.fit_transform(X_train)
+    x_test_array  = preprocessor.transform(X_test)
 
     # Obtener nombres de columnas transformadas
     try:
         feature_names = preprocessor.get_feature_names_out()
     except Exception as e:
-        warnings.warn(f"No se pudieron obtener nombres de features: {e}")
-        feature_names = [f"feature_{i}" for i in range(X_train_array.shape[1])]
+        warnings.warn("No se pudieron obtener nombres de features: %s" % e)
+        feature_names = ["feature_%d" % i for i in range(x_train_array.shape[1])]
 
     # Reconstruir DataFrames con índices originales
-    X_train_processed = pd.DataFrame(
-        X_train_array,
+    x_train_processed = pd.DataFrame(
+        x_train_array,
         columns=feature_names,
         index=X_train.index
     )
-
-    X_test_processed = pd.DataFrame(
-        X_test_array,
+    x_test_processed = pd.DataFrame(
+        x_test_array,
         columns=feature_names,
         index=X_test.index
     )
 
-    print(f"Transformación completada:")
-    print(f"  - X_train: {X_train_processed.shape}")
-    print(f"  - X_test: {X_test_processed.shape}")
-    print(f"  - Total features: {len(feature_names)}")
+    print("Transformación completada:")
+    print("  - X_train: %s" % str(x_train_processed.shape))
+    print("  - X_test: %s" % str(x_test_processed.shape))
+    print("  - Total features: %d" % len(feature_names))
 
     # Empaquetar artefactos con metadatos completos
     artifacts = {
@@ -669,7 +605,7 @@ def run_ft_engineering(
         "nominal_cols": nominal_cols,
         "ordinal_cols": ordinal_cols,
         "n_features_in": X_train.shape[1],
-        "n_features_out": X_train_processed.shape[1],
+        "n_features_out": x_train_processed.shape[1],
         "low_variation_cols": ['saldo_mora', 'saldo_mora_codeudor'],
         "winsorizer_config": {
             "method": "quantiles",
@@ -688,18 +624,15 @@ def run_ft_engineering(
     print("\n" + "=" * 70)
     print("PIPELINE DE INGENIERÍA COMPLETADO EXITOSAMENTE")
     print("=" * 70)
-
-    return X_train_processed, X_test_processed, y_train, y_test, artifacts
+    return x_train_processed, x_test_processed, y_train, y_test, artifacts
 
 
 # ===============================================================================
 # 10. UTILIDADES AUXILIARES
 # ===============================================================================
-
 def summarize_classification(X: pd.DataFrame, y: pd.Series) -> None:
     """
     Imprime resumen del dataset procesado.
-
     Args:
         X: Features procesadas
         y: Target
@@ -707,146 +640,138 @@ def summarize_classification(X: pd.DataFrame, y: pd.Series) -> None:
     print("\n" + "-" * 70)
     print("RESUMEN DEL DATASET")
     print("-" * 70)
-    print(f"Dimensiones: {X.shape[0]} filas x {X.shape[1]} columnas")
-    print(f"\nBalance de clases:")
+    print("Dimensiones: %d filas x %d columnas" % (X.shape[0], X.shape[1]))
+    print("\nBalance de clases:")
     print(y.value_counts())
-    print(f"\nProporción:")
+    print("\nProporción:")
     print(y.value_counts(normalize=True).round(4))
     print("-" * 70)
 
 
-def inspect_preprocessor(preprocessor: ColumnTransformer,
-                          X_sample: pd.DataFrame = None) -> None:
+def _inspect_transformer_step(step_name: str, step_transformer) -> None:
+    """
+    Imprime detalles de un step individual dentro de un pipeline.
+    Extrae lógica de inspect_preprocessor para reducir su Cognitive Complexity.
+    """
+    print("      -> %s: %s" % (step_name, type(step_transformer).__name__))
+    if hasattr(step_transformer, 'variables'):
+        print("         Variables: %d" % len(step_transformer.variables))
+    if isinstance(step_transformer, OrdinalEncoder) and hasattr(step_transformer, 'categories_'):
+        print("         Categorías: %s" % step_transformer.categories_)
+    if isinstance(step_transformer, OneHotEncoder) and hasattr(step_transformer, 'categories_'):
+        n_cats = sum(len(cats) for cats in step_transformer.categories_)
+        print("         Total categorías: %d" % n_cats)
+
+
+def inspect_preprocessor(preprocessor: ColumnTransformer) -> None:
     """
     Inspecciona la configuración del preprocessor entrenado.
-
     Útil para debugging y documentación.
-
     Args:
         preprocessor: ColumnTransformer ya ajustado
-        X_sample: Muestra de datos de entrada (opcional)
     """
     print("\nINSPECCIÓN DEL PREPROCESSOR")
     print("=" * 70)
-
     for name, transformer, columns in preprocessor.transformers_:
         if name == 'remainder':
             continue
-
-        print(f"\nTransformer: '{name}'")
+        print("\nTransformer: '%s'" % name)
         if len(columns) > 3:
-            print(f"   Columnas ({len(columns)}): {columns[:3]}...")
+            print("   Columnas (%d): %s..." % (len(columns), columns[:3]))
         else:
-            print(f"   Columnas: {columns}")
-        print(f"   Pipeline steps:")
-
+            print("   Columnas: %s" % columns)
+        print("   Pipeline steps:")
         if hasattr(transformer, 'steps'):
             for step_name, step_transformer in transformer.steps:
-                print(f"      -> {step_name}: {type(step_transformer).__name__}")
-
-                if hasattr(step_transformer, 'variables'):
-                    print(f"         Variables: {len(step_transformer.variables)}")
-                if isinstance(step_transformer, OrdinalEncoder) and hasattr(step_transformer, 'categories_'):
-                    print(f"         Categorías: {step_transformer.categories_}")
-                if isinstance(step_transformer, OneHotEncoder) and hasattr(step_transformer, 'categories_'):
-                    n_cats = sum(len(cats) for cats in step_transformer.categories_)
-                    print(f"         Total categorías: {n_cats}")
-
+                _inspect_transformer_step(step_name, step_transformer)
     print("=" * 70)
 
 
 def save_preprocessor(preprocessor, path: str = "artifacts/preprocessor.pkl") -> None:
     """
     Guarda el preprocessor entrenado para uso posterior.
-
     Args:
         preprocessor: ColumnTransformer entrenado
         path: Ruta donde guardar el archivo
     """
     import joblib
-
     os.makedirs(os.path.dirname(path), exist_ok=True)
     joblib.dump(preprocessor, path)
-    print(f"Preprocessor guardado en: {path}")
+    print("Preprocessor guardado en: %s" % path)
 
 
 def load_preprocessor(path: str = "artifacts/preprocessor.pkl") -> ColumnTransformer:
     """
     Carga un preprocessor previamente guardado.
-
     Args:
         path: Ruta del archivo
-
     Returns:
         ColumnTransformer cargado
     """
     import joblib
     preprocessor = joblib.load(path)
-    print(f"Preprocessor cargado desde: {path}")
+    print("Preprocessor cargado desde: %s" % path)
     return preprocessor
 
 
 # ===============================================================================
 # 11. PUNTO DE ENTRADA PARA PRUEBAS
 # ===============================================================================
-
 if __name__ == "__main__":
     """
     Ejecuta el pipeline completo y muestra resultados detallados.
     """
     print("\nEjecutando ft_engineering.py en modo de validación...\n")
-
     try:
         # Ejecutar pipeline completo
-        X_train, X_test, y_train, y_test, artifacts = run_ft_engineering()
+        x_train, x_test, y_train, y_test, artifacts = run_ft_engineering()
 
         # Guardar preprocessor
         save_preprocessor(artifacts['preprocessor'])
 
         # Resúmenes de datos
         print("\nRESUMEN DE TRAIN:")
-        summarize_classification(X_train, y_train)
+        summarize_classification(x_train, y_train)
 
         print("\nRESUMEN DE TEST:")
-        summarize_classification(X_test, y_test)
+        summarize_classification(x_test, y_test)
 
         # Información de artefactos
         print("\nARTEFACTOS GENERADOS:")
-        print(f"  - Preprocessor: {type(artifacts['preprocessor']).__name__}")
-        print(f"  - Features de entrada: {artifacts['n_features_in']}")
-        print(f"  - Features de salida: {artifacts['n_features_out']}")
-        print(f"  - Expansión: {artifacts['n_features_out'] / artifacts['n_features_in']:.2f}x")
+        print("  - Preprocessor: %s" % type(artifacts['preprocessor']).__name__)
+        print("  - Features de entrada: %d" % artifacts['n_features_in'])
+        print("  - Features de salida: %d" % artifacts['n_features_out'])
+        print("  - Expansión: %.2fx" % (artifacts['n_features_out'] / artifacts['n_features_in']))
 
         # Inspección técnica detallada
         print("\n" + "=" * 70)
         print("INSPECCIÓN TÉCNICA DE COLUMNAS Y ENCODING")
         print("=" * 70)
-
-        print(f"\nNombres de las {len(X_train.columns)} columnas finales:")
-        for i, col in enumerate(X_train.columns, 1):
-            print(f"  {i:2d}. {col}")
+        print("\nNombres de las %d columnas finales:" % len(x_train.columns))
+        for i, col in enumerate(x_train.columns, 1):
+            print("  %2d. %s" % (i, col))
 
         # Verificar transformación Ordinal
-        col_ordinal = [c for c in X_train.columns if 'tendencia_ingresos' in c]
+        col_ordinal = [c for c in x_train.columns if 'tendencia_ingresos' in c]
         if col_ordinal:
-            print(f"\nVerificación de OrdinalEncoder ({col_ordinal[0]}):")
-            print(f"   Valores únicos transformados: {sorted(X_train[col_ordinal[0]].unique())}")
-            print(f"   Mapeo esperado: Decreciente->0, Estable->1, Creciente->2, Unknown->-1")
-            print(f"   Distribución:")
-            for val, count in X_train[col_ordinal[0]].value_counts().items():
-                print(f"      {val}: {count} ({count/len(X_train)*100:.1f}%)")
+            print("\nVerificación de OrdinalEncoder (%s):" % col_ordinal[0])
+            print("   Valores únicos transformados: %s" % sorted(x_train[col_ordinal[0]].unique()))
+            print("   Mapeo esperado: Decreciente->0, Estable->1, Creciente->2, Unknown->-1")
+            print("   Distribución:")
+            for val, count in x_train[col_ordinal[0]].value_counts().items():
+                print("      %s: %d (%.1f%%)" % (val, count, count / len(x_train) * 100))
 
         # Identificar columnas creadas por OneHotEncoder
-        col_nominales = [c for c in X_train.columns if 'cat__' in c]
-        print(f"\nColumnas creadas por OneHotEncoder (Total: {len(col_nominales)}):")
+        col_nominales = [c for c in x_train.columns if 'cat__' in c]
+        print("\nColumnas creadas por OneHotEncoder (Total: %d):" % len(col_nominales))
         for col in col_nominales:
-            print(f"   - {col}")
+            print("   - %s" % col)
 
         # Información de variables numéricas
-        col_numericas = [c for c in X_train.columns if 'num__' in c]
-        print(f"\nVariables numéricas transformadas (Total: {len(col_numericas)}):")
-        print(f"   Primeras 5: {col_numericas[:5]}")
-        print(f"   Últimas 5: {col_numericas[-5:]}")
+        col_numericas = [c for c in x_train.columns if 'num__' in c]
+        print("\nVariables numéricas transformadas (Total: %d):" % len(col_numericas))
+        print("   Primeras 5: %s" % col_numericas[:5])
+        print("   Últimas 5: %s" % col_numericas[-5:])
 
         # Inspeccionar preprocessor
         inspect_preprocessor(artifacts['preprocessor'])
@@ -864,7 +789,7 @@ if __name__ == "__main__":
         print("\nPipeline de validación ejecutado exitosamente")
 
     except Exception as e:
-        print(f"\nError durante la ejecución: {e}")
+        print("\nError durante la ejecución: %s" % e)
         import traceback
         traceback.print_exc()
         raise
