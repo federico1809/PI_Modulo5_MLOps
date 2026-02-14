@@ -1,5 +1,4 @@
 name: SonarCloud Analysis
-
 on:
   push:
     branches:
@@ -7,14 +6,11 @@ on:
       - developer
   pull_request:
     types: [opened, synchronize, reopened]
-
 jobs:
   sonarcloud:
     name: Analyze with SonarCloud
     runs-on: ubuntu-latest
-
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -35,5 +31,3 @@ jobs:
           args: >
             -Dsonar.organization=datulito
             -Dsonar.projectKey=federico1809_PI_Modulo5_MLOps
-            -Dsonar.coverage.exclusions=**
-            -Dsonar.tests=**/*.py
