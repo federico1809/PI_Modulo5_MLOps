@@ -18,3 +18,20 @@ Thumbs.db
 .env
 
 *.log
+
+mlops_pipeline/src/artifacts/
+*.pkl
+
+# MLOps artifacts
+mlops_pipeline/artifacts/
+mlops_pipeline/src/artifacts/
+
+# Monitoring outputs
+mlops_pipeline/*monitoring*.csv
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS
+Thumbs.db
