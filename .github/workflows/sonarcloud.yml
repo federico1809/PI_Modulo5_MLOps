@@ -27,6 +27,12 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      # ── Paso crítico: generar coverage antes de SonarCloud Scan ──
+      - name: Run tests with coverage
+        run: |
+          pip install pytest pytest-cov
+          pytest --cov=mlops_pipeline --cov-report=xml
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
         env:
@@ -35,3 +41,4 @@ jobs:
           args: >
             -Dsonar.organization=datulito
             -Dsonar.projectKey=federico1809_PI_Modulo5_MLOps
+            -Dsonar.python.coverage.reportPaths=coverage.xml
