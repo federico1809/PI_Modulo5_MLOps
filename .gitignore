@@ -16,22 +16,32 @@ Thumbs.db
 
 # Secrets
 .env
+*.pem
 
+# Logs
 *.log
 
+# Model artifacts
 mlops_pipeline/src/artifacts/
+artifacts/
 *.pkl
+*.joblib
 
-# MLOps artifacts
-mlops_pipeline/artifacts/
-mlops_pipeline/src/artifacts/
+# Docker
+.dockerignore
+*.tar
 
-# Monitoring outputs
-mlops_pipeline/*monitoring*.csv
+# Data
+*.csv
+*.parquet
 
-# Python cache
-__pycache__/
-*.pyc
+# AWS
+aws/
 
-# OS
-Thumbs.db
+# Cache
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
