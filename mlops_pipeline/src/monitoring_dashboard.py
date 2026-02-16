@@ -92,12 +92,14 @@ def classify_psi(value: float) -> str:
     if value < PSI_THRESHOLDS["moderado"]:
         return "moderado"
     return "alto"
+
 def add_drift_classification(df: pd.DataFrame) -> pd.DataFrame:
     """
     Agrega columna de clasificacion de drift basada en PSI para numericas
     y chi-square para categoricas.
     """
     df = df.copy()
+
     def classify_row(row):
         if row["feature_type"] == "numeric":
             return classify_psi(row.get("psi", np.nan))
@@ -105,6 +107,7 @@ def add_drift_classification(df: pd.DataFrame) -> pd.DataFrame:
         if pd.isna(chi2):
             return "sin dato"
         return "calculado"
+
     df["drift_level"] = df.apply(classify_row, axis=1)
     return df
 # =============================================================================
@@ -161,6 +164,7 @@ def plot_psi_ranking(df: pd.DataFrame, top_n: int = 15):
     ax.legend(fontsize=8)
     fig.tight_layout()
     return fig
+
 def plot_ks_ranking(df: pd.DataFrame, top_n: int = 15):
     """
     Grafico de barras horizontal con el estadistico KS de las features numericas.
@@ -181,6 +185,7 @@ def plot_ks_ranking(df: pd.DataFrame, top_n: int = 15):
     ax.legend(fontsize=8)
     fig.tight_layout()
     return fig
+
 def plot_chi2_ranking(df: pd.DataFrame, top_n: int = 15):
     """
     Grafico de barras horizontal con el chi-square de las features categoricas.
@@ -196,6 +201,7 @@ def plot_chi2_ranking(df: pd.DataFrame, top_n: int = 15):
     ax.set_xlabel("Chi-square statistic")
     fig.tight_layout()
     return fig
+
 def plot_nan_heatmap(df: pd.DataFrame):
     """
     Grafico comparativo de proporcion de NaN entre baseline y current.
@@ -226,9 +232,11 @@ def plot_nan_heatmap(df: pd.DataFrame):
 # =============================================================================
 # SECCIONES DEL DASHBOARD (extraídas para reducir Cognitive Complexity)
 # =============================================================================
-def _render_sidebar(metrics_path: str) -> tuple:
+def _render_sidebar() -> tuple:
     """
     Renderiza el sidebar completo y retorna los parámetros de configuración.
+    El input de metrics_path se maneja en run_dashboard() porque se comparte
+    con load_drift_metrics() y _render_run_button().
     Returns
     -------
     tuple
@@ -256,7 +264,6 @@ def _render_sidebar(metrics_path: str) -> tuple:
         "Modo append (acumular histórico)", value=True
     )
     return top_n, show_warnings, data_path_input, cutoff_date_input, append_mode
-
 
 def _render_run_button(
     data_path_input: str,
@@ -290,7 +297,6 @@ def _render_run_button(
             except Exception as e:
                 st.sidebar.error("Error al ejecutar el monitoreo: %s" % e)
 
-
 def _render_summary_section(df: pd.DataFrame) -> None:
     """
     Renderiza la sección de resumen general con métricas clave.
@@ -308,7 +314,6 @@ def _render_summary_section(df: pd.DataFrame) -> None:
             "Fecha de corte: %s  |  Última ejecución: %s"
             % (summary["cutoff_date"], summary.get("ultima_ejecucion", "N/D"))
         )
-
 
 def _render_period_section(df: pd.DataFrame) -> None:
     """
@@ -335,7 +340,6 @@ def _render_period_section(df: pd.DataFrame) -> None:
             row["current_period_end"].strftime("%Y-%m-%d")
         )
     )
-
 
 def _render_numeric_drift_section(df: pd.DataFrame, top_n: int) -> None:
     """
@@ -371,7 +375,6 @@ def _render_numeric_drift_section(df: pd.DataFrame, top_n: int) -> None:
             )
         else:
             st.info("No hay datos de Jensen-Shannon disponibles.")
-
 
 def _render_table_and_warnings(df: pd.DataFrame, show_warnings: bool) -> None:
     """
@@ -419,15 +422,17 @@ def run_dashboard():
     st.title("Model Monitoring Dashboard")
     st.caption("Visualizacion de metricas de data drift generadas por model_monitoring.py")
 
-    # Sidebar: input de ruta de métricas (fuera del helper para poder pasarlo)
+    # metrics_path se define aquí porque se comparte entre:
+    # - load_drift_metrics() para leer el CSV
+    # - _render_run_button() para saber dónde guardar las métricas nuevas
     metrics_path = st.sidebar.text_input(
         "Ruta al CSV de metricas",
         DEFAULT_METRICS_PATH
     )
 
-    # Sidebar: resto de la configuración y botón de ejecución
+    # Sidebar: resto de configuración (sin metrics_path, que ya está arriba)
     top_n, show_warnings, data_path_input, cutoff_date_input, append_mode = (
-        _render_sidebar(metrics_path)
+        _render_sidebar()
     )
     _render_run_button(data_path_input, metrics_path, cutoff_date_input, append_mode)
 

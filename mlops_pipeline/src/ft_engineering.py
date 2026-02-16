@@ -1,6 +1,6 @@
 """
 Pipeline de Ingeniería de Características - Proyecto MLOps
-Versión: 1.1.1
+Versión: 1.2.0
 Este módulo implementa el pipeline completo de transformación de features
 para el modelo predictivo de comportamiento crediticio.
 Responsabilidades:
@@ -11,13 +11,17 @@ Responsabilidades:
 - Construcción de pipelines de transformación por tipo de variable
 - Generación de datasets procesados listos para modelamiento
 - Exportación de datos para monitoreo de drift
+CAMBIOS v1.2.0:
+- Split cronológico 70/15/15 (train/val/test) reemplaza al aleatorio estratificado
+- Se agrega conjunto de validación para tuning de hiperparámetros
+- run_ft_engineering retorna x_val_processed e y_val adicionalmente
+- artifacts incluye metadatos del split cronológico y cutoff dates
 """
 import os
 import pandas as pd
 import numpy as np
 from typing import Dict, Tuple, Optional, List
 import warnings
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -31,11 +35,9 @@ warnings.filterwarnings('ignore')
 def _resolve_default_path(ruta_proyecto: str, prefer: str) -> str:
     """
     Resuelve la ruta por defecto según el formato preferido.
-    Extrae lógica de selección para reducir complejidad de load_data.
     """
     path_xlsx = os.path.join(ruta_proyecto, "Base_de_datos.xlsx")
     path_csv  = os.path.join(ruta_proyecto, "Base_de_datos.csv")
-
     if prefer == "xlsx":
         return path_xlsx if os.path.exists(path_xlsx) else path_csv
     return path_csv if os.path.exists(path_csv) else path_xlsx
@@ -44,7 +46,6 @@ def _resolve_default_path(ruta_proyecto: str, prefer: str) -> str:
 def _load_by_extension(path: str) -> pd.DataFrame:
     """
     Carga el archivo según su extensión.
-    Extrae lógica de lectura para reducir complejidad de load_data.
     """
     file_extension = os.path.splitext(path)[1].lower()
     if file_extension in ['.xlsx', '.xls']:
@@ -64,8 +65,6 @@ def load_data(path: Optional[str] = None, prefer: str = "xlsx") -> pd.DataFrame:
     Args:
         path:   Ruta al archivo. Si es None, usa ubicación por defecto.
         prefer: Formato preferido cuando ambos archivos existen ('xlsx' o 'csv').
-                - 'xlsx': prioriza el Excel crudo (usado por run_ft_engineering).
-                - 'csv' : prioriza el CSV procesado (usado por monitoring).
     Returns:
         DataFrame con los datos cargados y fecha parseada.
     Raises:
@@ -74,7 +73,7 @@ def load_data(path: Optional[str] = None, prefer: str = "xlsx") -> pd.DataFrame:
     """
     if path is None:
         ruta_actual   = os.path.dirname(os.path.abspath(__file__))
-        ruta_proyecto = os.path.dirname(ruta_actual)
+        ruta_proyecto = os.path.dirname(os.path.dirname(ruta_actual))
         path          = _resolve_default_path(ruta_proyecto, prefer)
         if not os.path.exists(path):
             raise FileNotFoundError(
@@ -111,7 +110,6 @@ def generate_date_features(
         df: DataFrame con la columna de fecha
         date_col: Nombre de la columna temporal
         drop_original: Si True elimina la columna original.
-                       Si False la conserva (recomendado para monitoring).
     Returns:
         DataFrame con variables derivadas.
     """
@@ -147,7 +145,7 @@ def split_features_target(
         df: DataFrame completo
         target_col: Nombre de la columna objetivo
     Returns:
-        Tupla (X, y) donde X son las features y y es el target
+        Tupla (X, y)
     Raises:
         ValueError: Si la columna objetivo no existe
     """
@@ -175,13 +173,9 @@ def validate_data_quality(X: pd.DataFrame, y: pd.Series) -> None:
     - Valores nulos excesivos (>50%)
     - Columnas con varianza cero
     - Desbalanceo extremo en el target (>95%)
-    Args:
-        X: Features
-        y: Target
     """
     print("\nValidando calidad de datos...")
 
-    # 1. Revisar nulos
     missing_pct  = (X.isnull().sum() / len(X)) * 100
     high_missing = missing_pct[missing_pct > 50]
     if not high_missing.empty:
@@ -189,7 +183,6 @@ def validate_data_quality(X: pd.DataFrame, y: pd.Series) -> None:
             "Columnas con >50%% de valores nulos:\n%s" % high_missing.to_dict()
         )
 
-    # 2. Revisar varianza cero
     numeric_cols_check = X.select_dtypes(include=[np.number]).columns
     zero_var = X[numeric_cols_check].nunique() == 1
     if zero_var.any():
@@ -198,7 +191,6 @@ def validate_data_quality(X: pd.DataFrame, y: pd.Series) -> None:
             % zero_var[zero_var].index.tolist()
         )
 
-    # 3. Revisar desbalanceo
     class_balance = y.value_counts(normalize=True)
     if class_balance.max() > 0.95:
         warnings.warn(
@@ -216,48 +208,21 @@ def validate_data_quality(X: pd.DataFrame, y: pd.Series) -> None:
 def define_feature_types() -> Dict[str, List[str]]:
     """
     Define la clasificación de variables según su tipo semántico.
-    Esta clasificación es estática y se basa en el diseño del proyecto.
-    Incluye las variables derivadas de fecha.
-    Returns:
-        Diccionario con listas de columnas por tipo:
-        - numeric: Variables numéricas (continuas y discretas) + derivadas de fecha
-        - nominal: Variables categóricas sin orden
-        - ordinal: Variables categóricas con orden semántico
     """
     return {
         "numeric": [
-            # Numéricas continuas
-            "capital_prestado",
-            "salario_cliente",
-            "puntaje",
-            "puntaje_datacredito",
-            "saldo_mora",
-            "saldo_total",
-            "saldo_principal",
-            "saldo_mora_codeudor",
-            "promedio_ingresos_datacredito",
-            # Numéricas discretas
-            "total_otros_prestamos",
-            "cant_creditosvigentes",
-            "huella_consulta",
-            "creditos_sectorFinanciero",
-            "creditos_sectorCooperativo",
-            "creditos_sectorReal",
-            "plazo_meses",
-            "edad_cliente",
-            "cuota_pactada",
-            # Derivadas de fecha (tratadas como numéricas)
-            "fecha_prestamo_year",
-            "fecha_prestamo_month",
-            "fecha_prestamo_weekday"
+            "capital_prestado", "salario_cliente", "puntaje",
+            "puntaje_datacredito", "saldo_mora", "saldo_total",
+            "saldo_principal", "saldo_mora_codeudor",
+            "promedio_ingresos_datacredito", "total_otros_prestamos",
+            "cant_creditosvigentes", "huella_consulta",
+            "creditos_sectorFinanciero", "creditos_sectorCooperativo",
+            "creditos_sectorReal", "plazo_meses", "edad_cliente",
+            "cuota_pactada", "fecha_prestamo_year",
+            "fecha_prestamo_month", "fecha_prestamo_weekday"
         ],
-        "nominal": [
-            "tipo_laboral",
-            "tipo_credito"
-        ],
-        "ordinal": [
-            "tendencia_ingresos"
-        ]
+        "nominal": ["tipo_laboral", "tipo_credito"],
+        "ordinal": ["tendencia_ingresos"]
     }
 
 
@@ -267,12 +232,6 @@ def validate_and_filter_features(
 ) -> Dict[str, List[str]]:
     """
     Filtra las listas de features para incluir solo columnas existentes en X.
-    Emite warnings para columnas esperadas pero ausentes.
-    Args:
-        X: DataFrame de features
-        feature_types: Diccionario con tipos de features (salida de define_feature_types)
-    Returns:
-        Diccionario con listas filtradas de columnas existentes
     """
     filtered_types = {}
     for var_type, cols in feature_types.items():
@@ -301,66 +260,32 @@ def build_preprocessor(
 ) -> ColumnTransformer:
     """
     Construye el ColumnTransformer con pipelines específicos por tipo de variable.
-    LÓGICA DE DISEÑO:
-    - Se excluyen variables con alta concentración de ceros (>95%) del Winsorizer
-      debido a colapso de cuantiles.
-    - Se utiliza RobustScaler para mitigar impacto de outliers sin perder
-      señal de riesgo crediticio.
-    PIPELINES:
-    1. NUMERIC: Imputación -> Winsorización (selectiva) -> Escalado
-    2. ORDINAL: Imputación -> Encoding -> Escalado
-    3. NOMINAL: Imputación -> OneHotEncoding
-    Args:
-        numeric_cols: Lista de columnas numéricas
-        nominal_cols: Lista de columnas categóricas nominales
-        ordinal_cols: Lista de columnas categóricas ordinales
-    Returns:
-        ColumnTransformer configurado y listo para fit/transform
     """
-    # Variables con baja varianza (alta concentración de ceros)
     low_variation_cols = ['saldo_mora', 'saldo_mora_codeudor']
+    cols_to_winsorize  = [c for c in numeric_cols if c not in low_variation_cols]
 
-    # Columnas que SÍ pasarán por Winsorizer
-    cols_to_winsorize = [c for c in numeric_cols if c not in low_variation_cols]
-
-    # Pipeline Numérico
     numeric_pipeline = Pipeline(steps=[
-        ("imputer", MeanMedianImputer(
-            imputation_method="median",
-            variables=numeric_cols
-        )),
-        ("winsorizer", Winsorizer(
-            capping_method="quantiles",
-            tail="both",
-            fold=0.05,
-            variables=cols_to_winsorize
-        )),
+        ("imputer", MeanMedianImputer(imputation_method="median", variables=numeric_cols)),
+        ("winsorizer", Winsorizer(capping_method="quantiles", tail="both",
+                                  fold=0.05, variables=cols_to_winsorize)),
         ("scaler", RobustScaler())
     ])
 
-    # Pipeline Ordinal
-    ordinal_mapping = [["Decreciente", "Estable", "Creciente"]]
     ordinal_pipeline = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
         ("encoder", OrdinalEncoder(
-            categories=ordinal_mapping,
+            categories=[["Decreciente", "Estable", "Creciente"]],
             handle_unknown="use_encoded_value",
             unknown_value=-1
         )),
         ("scaler", RobustScaler())
     ])
 
-    # Pipeline Nominal
     nominal_pipeline = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("encoder", OneHotEncoder(
-            handle_unknown="ignore",
-            sparse_output=False,
-            drop=None
-        ))
+        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False, drop=None))
     ])
 
-    # ColumnTransformer Final
     preprocessor = ColumnTransformer(
         transformers=[
             ("num", numeric_pipeline, numeric_cols),
@@ -381,53 +306,69 @@ def build_preprocessor(
 
 
 # ===============================================================================
-# 7. SPLIT TRAIN/TEST
+# 7. SPLIT CRONOLÓGICO TRAIN / VAL / TEST
 # ===============================================================================
-def split_train_test(
+def split_train_val_test(
     X: pd.DataFrame,
     y: pd.Series,
-    test_size: float = 0.2,
-    random_state: int = 42
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+    train_size: float = 0.70,
+    val_size: float = 0.15,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame,
+           pd.Series, pd.Series, pd.Series]:
     """
-    Divide los datos en conjuntos de entrenamiento y prueba.
-    Utiliza estratificación para mantener la proporción de clases.
-    Args:
-        X: Features
-        y: Target
-        test_size: Proporción del conjunto de prueba (default: 0.2 = 20%)
-        random_state: Semilla para reproducibilidad
-    Returns:
-        Tupla (X_train, X_test, y_train, y_test)
-    """
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=y
-    )
+    Split cronológico en tres conjuntos: train, validación y test.
 
-    print("Split completado:")
-    print("  - Train: %d filas (%.0f%%)" % (X_train.shape[0], (1 - test_size) * 100))
-    print("  - Test: %d filas (%.0f%%)" % (X_test.shape[0], test_size * 100))
+    IMPORTANTE: X e y deben estar ordenados cronológicamente antes de llamar
+    esta función (run_ft_engineering lo garantiza).
+
+    La división respeta el orden temporal:
+        [--- 70% train ---][--- 15% val ---][--- 15% test ---]
+
+    No se usa aleatorización para evitar data leakage temporal.
+
+    Args:
+        X:          Features ordenadas cronológicamente
+        y:          Target ordenado cronológicamente
+        train_size: Proporción de entrenamiento (default: 0.70)
+        val_size:   Proporción de validación   (default: 0.15)
+                    test_size se infiere como 1 - train_size - val_size
+    Returns:
+        Tupla (x_train, x_val, x_test, y_train, y_val, y_test)
+    Raises:
+        ValueError: Si las proporciones no suman <= 1.0
+    """
+    test_size = round(1.0 - train_size - val_size, 10)
+    if test_size <= 0:
+        raise ValueError(
+            "train_size + val_size debe ser menor a 1.0. "
+            "Valor recibido: %.2f + %.2f = %.2f" % (train_size, val_size, train_size + val_size)
+        )
+
+    n         = len(X)
+    train_end = int(n * train_size)
+    val_end   = int(n * (train_size + val_size))
+
+    x_train, x_val, x_test = X.iloc[:train_end], X.iloc[train_end:val_end], X.iloc[val_end:]
+    y_train, y_val, y_test  = y.iloc[:train_end], y.iloc[train_end:val_end], y.iloc[val_end:]
+
+    print("Split cronológico completado:")
+    print("  - Train: %d filas (%.0f%%)" % (len(x_train), train_size * 100))
+    print("  - Val:   %d filas (%.0f%%)" % (len(x_val),   val_size * 100))
+    print("  - Test:  %d filas (%.0f%%)" % (len(x_test),  test_size * 100))
     print("  - Balance train: %s" % y_train.value_counts(normalize=True).round(3).to_dict())
-    print("  - Balance test: %s" % y_test.value_counts(normalize=True).round(3).to_dict())
-    return X_train, X_test, y_train, y_test
+    print("  - Balance val:   %s" % y_val.value_counts(normalize=True).round(3).to_dict())
+    print("  - Balance test:  %s" % y_test.value_counts(normalize=True).round(3).to_dict())
+
+    return x_train, x_val, x_test, y_train, y_val, y_test
 
 
 # ===============================================================================
-# 8. DATASET ESTRUCTURAL PARA MONITOREO (SIN TRANSFORMACIONES DE MODELADO)
+# 8. DATASET ESTRUCTURAL PARA MONITOREO
 # ===============================================================================
 def get_structural_dataset(data_path: Optional[str] = None) -> Tuple[pd.DataFrame, pd.Series]:
     """
-    Devuelve dataset limpio estructuralmente pero SIN transformaciones
-    de modelado (sin scaler, sin encoding, sin winsorization).
-    Ideal para drift monitoring, ya que mantiene los valores originales
-    después de las transformaciones estructurales básicas.
-    Args:
-        data_path: Ruta al archivo de datos (None = ubicación por defecto)
-    Returns:
-        Tupla (X, y) con datos estructuralmente limpios pero sin transformaciones
+    Devuelve dataset limpio estructuralmente pero SIN transformaciones de modelado.
+    Ideal para drift monitoring.
     """
     df = load_data(data_path, prefer="csv")
     df = generate_date_features(df, drop_original=True)
@@ -443,31 +384,14 @@ def build_monitoring_dataset(
 ) -> pd.DataFrame:
     """
     Genera dataset estructural para monitoreo de drift.
-    FUNCIÓN RECOMENDADA para generar datasets de monitoreo.
-    Características:
-    - Conserva fecha_prestamo original (opcional)
-    - Genera variables temporales derivadas
-    - No aplica transformaciones de modelado
-    - Parametrizable (no hardcodea nombres)
-    - Exporta CSV listo para model_monitoring
-    Args:
-        data_path: Ruta al dataset fuente (None = default)
-        output_path: Ruta del CSV final
-        target_col: Nombre de la columna target
-        keep_date: Si True, conserva fecha_prestamo original
-    Returns:
-        DataFrame con el dataset generado (también guardado en CSV)
+    Conserva fecha_prestamo para poder usar cutoff_date en model_monitoring.
     """
     print("\n" + "=" * 70)
     print("GENERANDO DATASET BASE PARA MONITOREO")
     print("=" * 70)
 
     df = load_data(data_path, prefer="csv")
-    df = generate_date_features(
-        df,
-        date_col="fecha_prestamo",
-        drop_original=not keep_date
-    )
+    df = generate_date_features(df, date_col="fecha_prestamo", drop_original=not keep_date)
 
     if target_col not in df.columns:
         raise ValueError(
@@ -476,7 +400,6 @@ def build_monitoring_dataset(
         )
 
     X, y = split_features_target(df, target_col=target_col)
-
     df_export = X.copy()
     df_export[y.name] = y
 
@@ -495,148 +418,176 @@ def build_monitoring_dataset(
 # ===============================================================================
 def run_ft_engineering(
     data_path: Optional[str] = None,
-    test_size: float = 0.2,
-    random_state: int = 42
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, Dict]:
+    train_size: float = 0.70,
+    val_size: float = 0.15,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame,
+           pd.Series, pd.Series, pd.Series, Dict]:
     """
     FUNCIÓN PRINCIPAL: Ejecuta el pipeline completo de ingeniería de características.
+
     FLUJO:
-    1. Carga de datos
-    2. Derivación de variables temporales
-    3. Separación de features y target
-    4. Validación de calidad de datos
-    5. Validación de tipos de variables
-    6. Split train/test
-    7. Construcción del preprocessor
-    8. Transformación de datos (fit en train, transform en test)
-    9. Reconstrucción de DataFrames con nombres de columnas
+    1.  Carga de datos
+    2.  Ordenamiento cronológico (crítico para split temporal)
+    3.  Derivación de variables temporales
+    4.  Separación de features y target
+    5.  Validación de calidad de datos
+    6.  Validación de tipos de variables
+    7.  Split cronológico train / val / test (70 / 15 / 15)
+    8.  Construcción del preprocessor
+    9.  Transformación: fit en train, transform en val y test
+    10. Reconstrucción de DataFrames con nombres de columnas
+
     Args:
-        data_path: Ruta al archivo de datos (None = ubicación por defecto)
-        test_size: Proporción del conjunto de prueba
-        random_state: Semilla para reproducibilidad
+        data_path:  Ruta al archivo de datos (None = ubicación por defecto)
+        train_size: Proporción de entrenamiento (default: 0.70)
+        val_size:   Proporción de validación   (default: 0.15)
+                    test_size se infiere como 1 - train_size - val_size
+
     Returns:
         Tupla con:
         - x_train_processed: DataFrame de features de entrenamiento transformadas
-        - x_test_processed: DataFrame de features de prueba transformadas
+        - x_val_processed:   DataFrame de features de validación transformadas
+        - x_test_processed:  DataFrame de features de prueba transformadas
         - y_train: Target de entrenamiento
-        - y_test: Target de prueba
+        - y_val:   Target de validación
+        - y_test:  Target de prueba
         - artifacts: Diccionario con preprocessor y metadatos completos
+                     artifacts['split_config']['cutoff_date_train'] → usar en model_monitoring
+                     como fecha de corte baseline/current
+
     Ejemplo:
-        >>> x_train, x_test, y_train, y_test, artifacts = run_ft_engineering()
-        >>> preprocessor = artifacts['preprocessor']
-        >>> feature_names = artifacts['feature_names']
+        >>> result = run_ft_engineering()
+        >>> x_train, x_val, x_test, y_train, y_val, y_test, artifacts = result
+        >>> preprocessor   = artifacts['preprocessor']
+        >>> cutoff_train   = artifacts['split_config']['cutoff_date_train']
     """
     print("=" * 70)
-    print("INICIO DEL PIPELINE DE INGENIERÍA DE CARACTERÍSTICAS")
+    print("INICIO DEL PIPELINE DE INGENIERÍA DE CARACTERÍSTICAS v1.2.0")
     print("=" * 70)
 
-    # PASO 1: Cargar datos — XLSX crudo
-    print("\n[1/8] Cargando datos...")
+    # PASO 1: Cargar datos
+    print("\n[1/9] Cargando datos...")
     df = load_data(data_path, prefer="xlsx")
 
-    # PASO 2: Generar variables temporales
-    print("\n[2/8] Generando variables temporales...")
+    # PASO 2: Ordenar cronológicamente ANTES de cualquier transformación
+    # Crítico: garantiza que el split temporal sea correcto y sin leakage
+    print("\n[2/9] Ordenando cronológicamente...")
+    if "fecha_prestamo" in df.columns:
+        df = df.sort_values("fecha_prestamo").reset_index(drop=True)
+        fecha_min = df["fecha_prestamo"].min()
+        fecha_max = df["fecha_prestamo"].max()
+        print("Dataset ordenado: %s → %s (%d registros)" % (
+            fecha_min.strftime("%Y-%m-%d"),
+            fecha_max.strftime("%Y-%m-%d"),
+            len(df)
+        ))
+    else:
+        warnings.warn(
+            "Columna 'fecha_prestamo' no encontrada. "
+            "El split cronológico puede no ser correcto."
+        )
+
+    # PASO 3: Generar variables temporales (después de ordenar, antes de dropear fecha)
+    print("\n[3/9] Generando variables temporales...")
     df = generate_date_features(df)
 
-    # PASO 3: Separar features y target
-    print("\n[3/8] Separando features y target...")
+    # PASO 4: Separar features y target
+    print("\n[4/9] Separando features y target...")
     X, y = split_features_target(df)
 
-    # PASO 4: Validar calidad de datos
-    print("\n[4/8] Validando calidad de datos...")
+    # PASO 5: Validar calidad de datos
+    print("\n[5/9] Validando calidad de datos...")
     validate_data_quality(X, y)
 
-    # PASO 5: Definir y validar tipos de variables
-    print("\n[5/8] Definiendo tipos de variables...")
+    # PASO 6: Definir y validar tipos de variables
+    print("\n[6/9] Definiendo tipos de variables...")
     feature_types = define_feature_types()
     feature_types = validate_and_filter_features(X, feature_types)
     numeric_cols  = feature_types["numeric"]
     nominal_cols  = feature_types["nominal"]
     ordinal_cols  = feature_types["ordinal"]
 
-    # PASO 6: Split train/test
-    print("\n[6/8] Dividiendo datos en train/test...")
-    X_train, X_test, y_train, y_test = split_train_test(
-        X, y,
-        test_size=test_size,
-        random_state=random_state
+    # PASO 7: Split cronológico train / val / test
+    print("\n[7/9] Split cronológico train/val/test...")
+    x_train, x_val, x_test, y_train, y_val, y_test = split_train_val_test(
+        X, y, train_size=train_size, val_size=val_size
     )
 
-    # PASO 7: Construir preprocessor
-    print("\n[7/8] Construyendo preprocessor...")
+    # Índices de corte para trazabilidad
+    n             = len(X)
+    train_end_idx = int(n * train_size)
+    val_end_idx   = int(n * (train_size + val_size))
+
+    # PASO 8: Construir preprocessor
+    print("\n[8/9] Construyendo preprocessor...")
     preprocessor = build_preprocessor(numeric_cols, nominal_cols, ordinal_cols)
 
-    # PASO 8: Transformar datos
-    print("\n[8/8] Transformando datos...")
+    # PASO 9: Transformar datos
+    print("\n[9/9] Transformando datos...")
     # CRÍTICO: fit_transform solo en train para evitar data leakage
-    x_train_array = preprocessor.fit_transform(X_train)
-    x_test_array  = preprocessor.transform(X_test)
+    x_train_array = preprocessor.fit_transform(x_train)
+    x_val_array   = preprocessor.transform(x_val)
+    x_test_array  = preprocessor.transform(x_test)
 
-    # Obtener nombres de columnas transformadas
     try:
         feature_names = preprocessor.get_feature_names_out()
     except Exception as e:
         warnings.warn("No se pudieron obtener nombres de features: %s" % e)
         feature_names = ["feature_%d" % i for i in range(x_train_array.shape[1])]
 
-    # Reconstruir DataFrames con índices originales
-    x_train_processed = pd.DataFrame(
-        x_train_array,
-        columns=feature_names,
-        index=X_train.index
-    )
-    x_test_processed = pd.DataFrame(
-        x_test_array,
-        columns=feature_names,
-        index=X_test.index
-    )
+    x_train_processed = pd.DataFrame(x_train_array, columns=feature_names, index=x_train.index)
+    x_val_processed   = pd.DataFrame(x_val_array,   columns=feature_names, index=x_val.index)
+    x_test_processed  = pd.DataFrame(x_test_array,  columns=feature_names, index=x_test.index)
 
     print("Transformación completada:")
-    print("  - X_train: %s" % str(x_train_processed.shape))
-    print("  - X_test: %s" % str(x_test_processed.shape))
+    print("  - x_train: %s" % str(x_train_processed.shape))
+    print("  - x_val:   %s" % str(x_val_processed.shape))
+    print("  - x_test:  %s" % str(x_test_processed.shape))
     print("  - Total features: %d" % len(feature_names))
 
-    # Empaquetar artefactos con metadatos completos
     artifacts = {
-        "preprocessor": preprocessor,
-        "feature_names": list(feature_names),
-        "feature_types": feature_types,
-        "numeric_cols": numeric_cols,
-        "nominal_cols": nominal_cols,
-        "ordinal_cols": ordinal_cols,
-        "n_features_in": X_train.shape[1],
+        "preprocessor":   preprocessor,
+        "feature_names":  list(feature_names),
+        "feature_types":  feature_types,
+        "numeric_cols":   numeric_cols,
+        "nominal_cols":   nominal_cols,
+        "ordinal_cols":   ordinal_cols,
+        "n_features_in":  x_train.shape[1],
         "n_features_out": x_train_processed.shape[1],
         "low_variation_cols": ['saldo_mora', 'saldo_mora_codeudor'],
         "winsorizer_config": {
             "method": "quantiles",
-            "fold": 0.05,
-            "tail": "both"
+            "fold":   0.05,
+            "tail":   "both"
         },
         "split_config": {
-            "test_size": test_size,
-            "random_state": random_state,
-            "stratify": True
+            "method":        "chronological",
+            "train_size":    train_size,
+            "val_size":      val_size,
+            "test_size":     round(1.0 - train_size - val_size, 10),
+            "train_end_idx": train_end_idx,
+            "val_end_idx":   val_end_idx,
+            # Usar cutoff_date_train en DriftMonitorConfig para comparar
+            # train (baseline) vs val+test (current)
+            "cutoff_date_train": str(x_train.index[-1]),
+            "cutoff_date_val":   str(x_val.index[-1]),
         },
         "class_balance_train": y_train.value_counts(normalize=True).to_dict(),
-        "class_balance_test": y_test.value_counts(normalize=True).to_dict()
+        "class_balance_val":   y_val.value_counts(normalize=True).to_dict(),
+        "class_balance_test":  y_test.value_counts(normalize=True).to_dict()
     }
 
     print("\n" + "=" * 70)
     print("PIPELINE DE INGENIERÍA COMPLETADO EXITOSAMENTE")
     print("=" * 70)
-    return x_train_processed, x_test_processed, y_train, y_test, artifacts
+    return x_train_processed, x_val_processed, x_test_processed, y_train, y_val, y_test, artifacts
 
 
 # ===============================================================================
 # 10. UTILIDADES AUXILIARES
 # ===============================================================================
 def summarize_classification(X: pd.DataFrame, y: pd.Series) -> None:
-    """
-    Imprime resumen del dataset procesado.
-    Args:
-        X: Features procesadas
-        y: Target
-    """
+    """Imprime resumen del dataset procesado."""
     print("\n" + "-" * 70)
     print("RESUMEN DEL DATASET")
     print("-" * 70)
@@ -649,10 +600,7 @@ def summarize_classification(X: pd.DataFrame, y: pd.Series) -> None:
 
 
 def _inspect_transformer_step(step_name: str, step_transformer) -> None:
-    """
-    Imprime detalles de un step individual dentro de un pipeline.
-    Extrae lógica de inspect_preprocessor para reducir su Cognitive Complexity.
-    """
+    """Imprime detalles de un step individual dentro de un pipeline."""
     print("      -> %s: %s" % (step_name, type(step_transformer).__name__))
     if hasattr(step_transformer, 'variables'):
         print("         Variables: %d" % len(step_transformer.variables))
@@ -664,12 +612,7 @@ def _inspect_transformer_step(step_name: str, step_transformer) -> None:
 
 
 def inspect_preprocessor(preprocessor: ColumnTransformer) -> None:
-    """
-    Inspecciona la configuración del preprocessor entrenado.
-    Útil para debugging y documentación.
-    Args:
-        preprocessor: ColumnTransformer ya ajustado
-    """
+    """Inspecciona la configuración del preprocessor entrenado."""
     print("\nINSPECCIÓN DEL PREPROCESSOR")
     print("=" * 70)
     for name, transformer, columns in preprocessor.transformers_:
@@ -688,12 +631,7 @@ def inspect_preprocessor(preprocessor: ColumnTransformer) -> None:
 
 
 def save_preprocessor(preprocessor, path: str = "artifacts/preprocessor.pkl") -> None:
-    """
-    Guarda el preprocessor entrenado para uso posterior.
-    Args:
-        preprocessor: ColumnTransformer entrenado
-        path: Ruta donde guardar el archivo
-    """
+    """Guarda el preprocessor entrenado para uso posterior."""
     import joblib
     os.makedirs(os.path.dirname(path), exist_ok=True)
     joblib.dump(preprocessor, path)
@@ -701,13 +639,7 @@ def save_preprocessor(preprocessor, path: str = "artifacts/preprocessor.pkl") ->
 
 
 def load_preprocessor(path: str = "artifacts/preprocessor.pkl") -> ColumnTransformer:
-    """
-    Carga un preprocessor previamente guardado.
-    Args:
-        path: Ruta del archivo
-    Returns:
-        ColumnTransformer cargado
-    """
+    """Carga un preprocessor previamente guardado."""
     import joblib
     preprocessor = joblib.load(path)
     print("Preprocessor cargado desde: %s" % path)
@@ -718,67 +650,39 @@ def load_preprocessor(path: str = "artifacts/preprocessor.pkl") -> ColumnTransfo
 # 11. PUNTO DE ENTRADA PARA PRUEBAS
 # ===============================================================================
 if __name__ == "__main__":
-    """
-    Ejecuta el pipeline completo y muestra resultados detallados.
-    """
-    print("\nEjecutando ft_engineering.py en modo de validación...\n")
+    print("\nEjecutando ft_engineering.py v1.2.0 en modo de validación...\n")
     try:
-        # Ejecutar pipeline completo
-        x_train, x_test, y_train, y_test, artifacts = run_ft_engineering()
+        # Ejecutar pipeline con split cronológico 70/15/15
+        x_train, x_val, x_test, y_train, y_val, y_test, artifacts = run_ft_engineering()
 
-        # Guardar preprocessor
         save_preprocessor(artifacts['preprocessor'])
 
-        # Resúmenes de datos
         print("\nRESUMEN DE TRAIN:")
         summarize_classification(x_train, y_train)
-
+        print("\nRESUMEN DE VALIDACIÓN:")
+        summarize_classification(x_val, y_val)
         print("\nRESUMEN DE TEST:")
         summarize_classification(x_test, y_test)
 
-        # Información de artefactos
         print("\nARTEFACTOS GENERADOS:")
         print("  - Preprocessor: %s" % type(artifacts['preprocessor']).__name__)
         print("  - Features de entrada: %d" % artifacts['n_features_in'])
-        print("  - Features de salida: %d" % artifacts['n_features_out'])
+        print("  - Features de salida:  %d" % artifacts['n_features_out'])
         print("  - Expansión: %.2fx" % (artifacts['n_features_out'] / artifacts['n_features_in']))
 
-        # Inspección técnica detallada
-        print("\n" + "=" * 70)
-        print("INSPECCIÓN TÉCNICA DE COLUMNAS Y ENCODING")
-        print("=" * 70)
-        print("\nNombres de las %d columnas finales:" % len(x_train.columns))
-        for i, col in enumerate(x_train.columns, 1):
-            print("  %2d. %s" % (i, col))
+        sc = artifacts['split_config']
+        print("\nSPLIT CRONOLÓGICO:")
+        print("  - Train:  %.0f%% → %d registros" % (sc['train_size'] * 100, len(x_train)))
+        print("  - Val:    %.0f%% → %d registros" % (sc['val_size']   * 100, len(x_val)))
+        print("  - Test:   %.0f%% → %d registros" % (sc['test_size']  * 100, len(x_test)))
+        print("\n  NOTA para model_monitoring.py:")
+        print("  Usar cutoff_date = fecha en el índice %d del dataset ordenado" % sc['train_end_idx'])
+        print("  Esto separa train (baseline) de val+test (current) en el monitoreo")
 
-        # Verificar transformación Ordinal
-        col_ordinal = [c for c in x_train.columns if 'tendencia_ingresos' in c]
-        if col_ordinal:
-            print("\nVerificación de OrdinalEncoder (%s):" % col_ordinal[0])
-            print("   Valores únicos transformados: %s" % sorted(x_train[col_ordinal[0]].unique()))
-            print("   Mapeo esperado: Decreciente->0, Estable->1, Creciente->2, Unknown->-1")
-            print("   Distribución:")
-            for val, count in x_train[col_ordinal[0]].value_counts().items():
-                print("      %s: %d (%.1f%%)" % (val, count, count / len(x_train) * 100))
-
-        # Identificar columnas creadas por OneHotEncoder
-        col_nominales = [c for c in x_train.columns if 'cat__' in c]
-        print("\nColumnas creadas por OneHotEncoder (Total: %d):" % len(col_nominales))
-        for col in col_nominales:
-            print("   - %s" % col)
-
-        # Información de variables numéricas
-        col_numericas = [c for c in x_train.columns if 'num__' in c]
-        print("\nVariables numéricas transformadas (Total: %d):" % len(col_numericas))
-        print("   Primeras 5: %s" % col_numericas[:5])
-        print("   Últimas 5: %s" % col_numericas[-5:])
-
-        # Inspeccionar preprocessor
         inspect_preprocessor(artifacts['preprocessor'])
 
-        # Generar dataset base para monitoreo (con fecha original)
         print("\n" + "=" * 70)
-        print("GENERANDO DATASET BASE PARA MONITOREO (CON FECHA ORIGINAL)")
+        print("GENERANDO DATASET BASE PARA MONITOREO")
         print("=" * 70)
         build_monitoring_dataset(
             output_path="Base_de_datos_monitoring.csv",
