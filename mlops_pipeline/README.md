@@ -1,293 +1,349 @@
-# Proyecto Integrador - Módulo 5  
-## Nube y Ciencia de Datos en Producción (MLOps)
+# Proyecto Integrador — Módulo 5  
+## Pipeline MLOps para Entrenamiento, Selección, Despliegue y Monitoreo de Modelos de Machine Learning
 
-Este repositorio contiene el desarrollo integral del Proyecto Integrador del Módulo 5, enfocado en la implementación de un ciclo completo de Machine Learning en producción bajo principios MLOps.
+Autor: Federico Ceballos Torres  
 
-El proyecto implementa un pipeline reproducible, versionado y preparado para producción, incluyendo:
+---
 
-- Ingeniería de características automatizada
-- Entrenamiento y selección de modelos supervisados con GridSearch
+# Descripción General
+
+Este repositorio implementa un pipeline completo de Machine Learning alineado con principios MLOps, diseñado para ser reproducible, versionado y preparado para entornos productivos.
+
+El objetivo del proyecto es construir un sistema robusto para predecir el comportamiento de pago de clientes utilizando técnicas de ingeniería de características, entrenamiento supervisado, optimización de hiperparámetros, despliegue e instrumentación de monitoreo.
+
+El pipeline garantiza:
+
+- Reproducibilidad completa
+- Eliminación de data leakage
+- Separación clara entre entrenamiento e inferencia
 - Persistencia de artefactos
-- Despliegue mediante API
-- Monitoreo y detección de drift
-- Dashboard de visualización
-- Integración con análisis estático de calidad (SonarCloud)
-- Flujo profesional de versionado con Git y Pull Requests
-
-Autor: Federico Ceballos Torres
+- Selección automática del mejor modelo
+- Preparación para despliegue en producción
+- Capacidad de monitoreo y detección de drift
 
 ---
 
-# Estructura del Proyecto
+# Arquitectura del Pipeline
 
-mlops_pipeline/  
-.github/
-├── src/  
-│   ├── Cargar_datos.ipynb  
-│   ├── comprension_eda.ipynb  
-│   ├── ft_engineering.py  
-│   ├── model_training_evaluation.py  
-│   ├── model_deploy.py  
-│   ├── model_monitoring.py  
-│   └── monitoring_dashboard.py 
-├── requirements.txt  
-├── .gitignore  
-├── sonar-project.properties  
-└── README.md  
-
----
-
-# Arquitectura del Pipeline MLOps
-
-El flujo completo del proyecto sigue una arquitectura modular:
+El flujo completo sigue la siguiente arquitectura:
 
 Datos crudos  
-→ Ingeniería de características  
-→ Entrenamiento con selección automática de hiperparámetros  
-→ Persistencia de artefactos  
+→ Feature Engineering  
+→ Split estratificado  
+→ Preprocesamiento persistido  
+→ Entrenamiento de múltiples modelos  
+→ Optimización de hiperparámetros (GridSearchCV)  
+→ Evaluación con métricas especializadas  
+→ Selección automática del mejor modelo  
+→ Persistencia del modelo  
 → Despliegue  
 → Monitoreo  
 → Visualización  
 
-Cada etapa es independiente, reproducible y versionada.
+Cada etapa es independiente, modular y reproducible.
 
 ---
 
-# 1. Ingeniería de Características (ft_engineering.py)
+# Estructura del Repositorio
 
-Este módulo implementa el pipeline completo de transformación de datos utilizando ColumnTransformer y transformadores de Scikit-learn y Feature-engine.
+```
+PI_Modulo5_MLOps/
+│
+├── .github/
+│   └── workflows/
+│       └── sonarcloud.yml
+│
+├── mlops_pipeline/
+│   │
+│   ├── src/
+│   │   ├── Cargar_datos.ipynb
+│   │   ├── comprension_eda.ipynb
+│   │   ├── ft_engineering.py
+│   │   ├── model_training_evaluation.py
+│   │   ├── model_deploy.py
+│   │   ├── model_monitoring.py
+│   │   └── monitoring_dashboard.py
+│   │
+│   ├── Base_de_datos.xlsx
+│   ├── requirements.txt
+│   ├── sonar-project.properties
+│   ├── .gitignore
+│   └── README.md
+│
+└── Dockerfile
+```
 
-### Funcionalidades principales
+Nota importante:  
+Los artefactos generados (*.pkl, *.joblib, artifacts/) no se versionan y están excluidos mediante `.gitignore`, siguiendo buenas prácticas MLOps.
 
-- Carga robusta de dataset mediante rutas relativas
-- Separación explícita entre X e y
-- Identificación automática de variables numéricas, categóricas, ordinales y temporales
+---
+
+# Feature Engineering — ft_engineering.py
+
+Este módulo implementa el pipeline completo de transformación de datos.
+
+Responsabilidades:
+
+- Carga robusta del dataset mediante rutas relativas
+- Separación explícita entre features y target
+- Identificación automática de variables numéricas y categóricas
+- Generación de variables temporales
 - Imputación de valores faltantes
-- Winsorización de outliers
-- Escalado de variables
-- Codificación OneHot
-- Generación de features temporales
-- División estratificada train/test
+- Escalado de variables numéricas
+- Codificación OneHot de variables categóricas
+- División estratificada en:
+
+  - Train
+  - Validation
+  - Test
+
 - Persistencia del preprocesador
 
-Artefacto generado:
-
-mlops_pipeline/artifacts/preprocessor.joblib
-
-Garantías MLOps:
+Garantías:
 
 - Eliminación de data leakage
-- Reproducibilidad total
 - Consistencia entre entrenamiento e inferencia
+- Reproducibilidad completa
+
+Salida del módulo:
+
+```
+X_train, X_val, X_test, y_train, y_val, y_test, preprocessor
+```
 
 ---
 
-# 2. Entrenamiento y Evaluación (model_training_evaluation.py)
+# Entrenamiento y Evaluación — model_training_evaluation.py
 
-Este módulo implementa el entrenamiento de múltiples modelos supervisados y la selección automática del mejor modelo utilizando GridSearchCV.
+Este módulo implementa el pipeline de entrenamiento, optimización y selección de modelos.
 
-### Flujo implementado
-
-1. Carga del preprocesador persistido
-2. Transformación automática de datos
-3. Entrenamiento de múltiples algoritmos
-4. Búsqueda de hiperparámetros mediante GridSearch
-5. Evaluación comparativa
-6. Selección automática del mejor modelo (basado en F1-score)
-7. Persistencia de artefactos
-
-Modelos evaluados (según configuración):
+Modelos soportados:
 
 - Logistic Regression
 - Random Forest
-- Gradient Boosting
 
-Métricas calculadas:
+Optimización mediante:
+
+GridSearchCV con validación cruzada estratificada.
+
+Optimización específica para datos desbalanceados utilizando:
+
+```
+class_weight = {0: 5, 1: 1}
+```
+
+Métrica principal de selección:
+
+```
+recall_class_0
+```
+
+Esto permite optimizar la detección de la clase minoritaria (clientes que no pagan a tiempo).
+
+---
+
+# Métricas evaluadas
+
+Se calculan métricas generales y específicas por clase:
+
+Generales:
 
 - Accuracy
-- Precision
-- Recall
-- F1-score
+- Precision (weighted)
+- Recall (weighted)
+- F1-score (weighted)
 - ROC-AUC
 
-Artefactos generados:
+Críticas para negocio:
 
-mlops_pipeline/artifacts/final_model.joblib  
-mlops_pipeline/artifacts/model_results.csv  
-mlops_pipeline/artifacts/best_params.json  
+- Precision clase 0
+- Recall clase 0
+- F1-score clase 0
 
-Versión estable asociada: v1.1.0
-
----
-
-# 3. Despliegue (model_deploy.py)
-
-Este módulo prepara el modelo para producción mediante un pipeline de inferencia automatizado.
-
-Flujo:
-
-Entrada → preprocessor → modelo entrenado → predicción
-
-Funcionalidades:
-
-- Carga de artefactos persistidos
-- Transformación automática
-- Generación de predicciones
-- Preparación para integración con FastAPI y contenedores
+Esto garantiza evaluación correcta en escenarios con desbalanceo severo.
 
 ---
 
-# 4. Monitoreo del Modelo (model_monitoring.py)
+# Persistencia de Artefactos
 
-Módulo orientado al monitoreo del comportamiento del modelo en producción.
+Los siguientes artefactos se generan localmente:
 
-Objetivos:
+- Modelo entrenado (.pkl)
+- Mejores hiperparámetros (.json)
+- Métricas (.csv)
+- Preprocesador (.joblib)
 
-- Detección de data drift
-- Seguimiento de métricas operativas
-- Registro de predicciones
-- Preparación para sistemas de alerta
+Estos artefactos no se suben al repositorio por diseño, siguiendo principios MLOps.
+
+Beneficios:
+
+- Separación entre código y modelo
+- Versionado limpio
+- Evita conflictos y archivos pesados en Git
+
+---
+
+# Despliegue — model_deploy.py
+
+Prepara el modelo para inferencia en producción.
+
+Pipeline de inferencia:
+
+Entrada  
+→ Preprocesador persistido  
+→ Modelo entrenado  
+→ Predicción  
+
+Diseñado para integración con:
+
+- FastAPI
+- Docker
+- Sistemas productivos
+
+---
+
+# Monitoreo — model_monitoring.py
+
+Permite monitorear el comportamiento del modelo en producción.
 
 Incluye:
 
-- Cálculo de métricas de distribución
-- Persistencia de registros
-- Soporte para análisis posterior
+- Seguimiento de predicciones
+- Preparación para detección de drift
+- Registro de métricas operativas
+
+Permite detectar degradación del modelo.
 
 ---
 
-# 5. Dashboard de Monitoreo (monitoring_dashboard.py)
+# Dashboard — monitoring_dashboard.py
 
-Aplicación de visualización para inspección del estado operativo del modelo.
+Permite visualizar métricas operativas del modelo.
+
+Preparado para integración con Streamlit.
 
 Permite:
 
-- Visualizar métricas clave
-- Analizar comportamiento histórico
-- Soporte para integración con Streamlit
+- Inspección de performance
+- Seguimiento temporal
+- Diagnóstico operativo
+
+---
+
+# Dockerización
+
+El proyecto incluye un Dockerfile que permite ejecutar el pipeline en entornos aislados.
+
+Beneficios:
+
+- Reproducibilidad completa
+- Portabilidad
+- Consistencia entre entornos
 
 ---
 
 # Calidad de Código — SonarCloud
 
-El proyecto integra análisis estático continuo mediante SonarCloud.
+El proyecto integra análisis estático automático mediante SonarCloud.
 
-- Quality Gate: PASSED
-- Sin vulnerabilidades críticas
-- Validación automática en cada push
+Validaciones incluidas:
 
-Archivo de configuración:
+- Bugs
+- Code smells
+- Seguridad
+- Mantenibilidad
 
-sonar-project.properties
+Ejecutado automáticamente mediante GitHub Actions.
 
-Workflow:
+Archivo:
 
+```
 .github/workflows/sonarcloud.yml
+```
 
 ---
 
-# Flujo de Versionado
+# Versionado y Flujo de Trabajo
 
-Ramas principales:
+Estrategia de ramas:
 
-main → producción estable  
-certification → validación previa a release  
 developer → desarrollo activo  
+main → versión estable  
 
-Flujo profesional:
+Flujo:
 
-1. Desarrollo en developer  
-2. Pull Request hacia certification  
-3. Revisión y validación  
-4. Merge hacia main  
-5. Creación de tag de versión  
-
-Versión estable actual:
-
-v1.1.0 → Feature Engineering + Model Training + GridSearch + Persistencia de artefactos
+1. Desarrollo en developer
+2. Validación
+3. Merge a main
+4. Release versionado
 
 ---
 
-# Configuración del Entorno
+# Instalación del Entorno
 
-Activar entorno virtual:
+Crear entorno virtual:
 
-.\.venv\Scripts\Activate.ps1
+```
+python -m venv .venv
+```
+
+Activar entorno:
+
+Windows:
+
+```
+.venv\Scripts\activate
+```
 
 Instalar dependencias:
 
-pip install -r requirements.txt
+```
+pip install -r mlops_pipeline/requirements.txt
+```
 
 ---
 
 # Ejecución del Pipeline
 
-Orden recomendado:
+Ejecutar desde la raíz del repositorio:
 
-python mlops_pipeline/src/ft_engineering.py  
-python mlops_pipeline/src/model_training_evaluation.py  
-python mlops_pipeline/src/model_deploy.py  
-python mlops_pipeline/src/model_monitoring.py  
+```
+python mlops_pipeline/src/model_training_evaluation.py
+```
 
----
+Esto ejecutará automáticamente:
 
-# Artefactos Generados
-
-Directorio:
-
-mlops_pipeline/artifacts/
-
-Contiene:
-
-- preprocessor.joblib
-- final_model.joblib
-- model_results.csv
-- best_params.json
-
-Estos artefactos garantizan:
-
-- Reproducibilidad completa
-- Separación entre entrenamiento y producción
-- Trazabilidad de hiperparámetros
-- Auditoría de resultados
+- Feature Engineering
+- Entrenamiento
+- Optimización
+- Evaluación
+- Selección del mejor modelo
+- Persistencia del modelo
 
 ---
 
-# Tecnologías Utilizadas
+# Principios MLOps Aplicados
 
-Machine Learning:
+Este proyecto implementa principios fundamentales de MLOps:
 
-- Scikit-learn
-- Feature-engine
-- Pandas
-- NumPy
-
-Visualización:
-
-- Matplotlib
-- Seaborn
-
-Persistencia:
-
-- Joblib
-
-MLOps y DevOps:
-
-- Git
-- GitHub
-- GitHub Actions
-- SonarCloud
+- Reproducibilidad
+- Eliminación de data leakage
+- Separación entrenamiento/inferencia
+- Persistencia de artefactos
+- Versionado profesional
+- Modularidad
+- Observabilidad
+- Preparación para producción
 
 ---
 
 # Estado del Proyecto
 
-Pipeline reproducible, versionado y alineado con principios MLOps.
+Pipeline completamente funcional y alineado con buenas prácticas MLOps.
 
-La arquitectura permite escalar hacia:
+Preparado para:
 
-- Integración completa con API REST
-- Contenerización
-- Monitoreo automatizado
-- CI/CD completo
-- Gestión avanzada de versiones
+- Despliegue en API
+- Contenerización completa
+- Integración CI/CD
+- Monitoreo productivo

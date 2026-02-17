@@ -29,62 +29,58 @@ from sklearn.preprocessing import RobustScaler, OneHotEncoder, OrdinalEncoder
 from feature_engine.imputation import MeanMedianImputer
 from feature_engine.outliers import Winsorizer
 warnings.filterwarnings('ignore')
+from pathlib import Path
+
 # ===============================================================================
 # 1. CARGA DE DATOS
 # ===============================================================================
-def _resolve_default_path(ruta_proyecto: str, prefer: str) -> str:
-    """
-    Resuelve la ruta por defecto según el formato preferido.
-    """
-    path_xlsx = os.path.join(ruta_proyecto, "Base_de_datos.xlsx")
-    path_csv  = os.path.join(ruta_proyecto, "Base_de_datos.csv")
-    if prefer == "xlsx":
-        return path_xlsx if os.path.exists(path_xlsx) else path_csv
-    return path_csv if os.path.exists(path_csv) else path_xlsx
 
-
-def _load_by_extension(path: str) -> pd.DataFrame:
-    """
-    Carga el archivo según su extensión.
-    """
-    file_extension = os.path.splitext(path)[1].lower()
-    if file_extension in ['.xlsx', '.xls']:
-        return pd.read_excel(path)
-    if file_extension == '.csv':
-        return pd.read_csv(path)
-    raise ValueError(
-        "Formato no soportado: %s. Use .xlsx, .xls o .csv" % file_extension
-    )
-
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def load_data(path: Optional[str] = None, prefer: str = "xlsx") -> pd.DataFrame:
     """
-    Carga el dataset desde archivo CSV o Excel.
-    Si no se proporciona ruta, busca Base_de_datos.xlsx/csv en el directorio raíz del proyecto.
-    Parsea automáticamente la columna de fecha.
-    Args:
-        path:   Ruta al archivo. Si es None, usa ubicación por defecto.
-        prefer: Formato preferido cuando ambos archivos existen ('xlsx' o 'csv').
-    Returns:
-        DataFrame con los datos cargados y fecha parseada.
-    Raises:
-        FileNotFoundError: Si el archivo no existe.
-        ValueError: Si el formato no es soportado.
+    Carga el dataset desde mlops_pipeline/Base_de_datos.xlsx o .csv.
+
+    Usa resolución absoluta basada en la ubicación del archivo fuente,
+    garantizando reproducibilidad independientemente del working directory.
     """
+
     if path is None:
-        ruta_actual   = os.path.dirname(os.path.abspath(__file__))
-        ruta_proyecto = os.path.dirname(os.path.dirname(ruta_actual))
-        path          = _resolve_default_path(ruta_proyecto, prefer)
-        if not os.path.exists(path):
+
+        xlsx_path = PROJECT_ROOT / "Base_de_datos.xlsx"
+        csv_path  = PROJECT_ROOT / "Base_de_datos.csv"
+
+        if prefer == "xlsx" and xlsx_path.exists():
+            path = xlsx_path
+
+        elif csv_path.exists():
+            path = csv_path
+
+        elif xlsx_path.exists():
+            path = xlsx_path
+
+        else:
             raise FileNotFoundError(
-                "No se encontró Base_de_datos.xlsx ni .csv en: %s" % ruta_proyecto
+                f"No se encontró Base_de_datos.xlsx ni Base_de_datos.csv en {PROJECT_ROOT}"
             )
 
-    if not os.path.exists(path):
-        raise FileNotFoundError("Archivo no encontrado: %s" % path)
+    else:
+        path = Path(path)
 
-    df = _load_by_extension(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Archivo no encontrado: {path}")
 
+    # Carga según extensión
+    if path.suffix.lower() in [".xlsx", ".xls"]:
+        df = pd.read_excel(path)
+
+    elif path.suffix.lower() == ".csv":
+        df = pd.read_csv(path)
+
+    else:
+        raise ValueError(f"Formato no soportado: {path.suffix}")
+
+    # Parseo de fecha si existe
     if "fecha_prestamo" in df.columns:
         df["fecha_prestamo"] = pd.to_datetime(
             df["fecha_prestamo"],
@@ -92,9 +88,9 @@ def load_data(path: Optional[str] = None, prefer: str = "xlsx") -> pd.DataFrame:
             errors="coerce"
         )
 
-    print("Datos cargados exitosamente: %d filas, %d columnas" % (df.shape[0], df.shape[1]))
-    return df
+    print(f"Datos cargados exitosamente: {df.shape[0]} filas, {df.shape[1]} columnas")
 
+    return df
 
 # ===============================================================================
 # 2. INGENIERÍA DE VARIABLES TEMPORALES
@@ -131,7 +127,6 @@ def generate_date_features(
     print("Columna original conservada: %s" % (not drop_original))
     return df
 
-
 # ===============================================================================
 # 3. SEPARACIÓN DE FEATURES Y TARGET
 # ===============================================================================
@@ -139,29 +134,40 @@ def split_features_target(
     df: pd.DataFrame,
     target_col: str = "Pago_atiempo"
 ) -> Tuple[pd.DataFrame, pd.Series]:
-    """
-    Separa features (X) y variable objetivo (y).
-    Args:
-        df: DataFrame completo
-        target_col: Nombre de la columna objetivo
-    Returns:
-        Tupla (X, y)
-    Raises:
-        ValueError: Si la columna objetivo no existe
-    """
+
     if target_col not in df.columns:
         raise ValueError(
-            "Columna objetivo '%s' no encontrada. "
-            "Columnas disponibles: %s" % (target_col, df.columns.tolist())
+            f"Columna objetivo '{target_col}' no encontrada"
         )
 
+    # VARIABLES CON DATA LEAKAGE
+    leakage_columns = [
+        target_col,
+        "saldo_mora",
+        "saldo_mora_codeudor",
+        "saldo_total",
+        "saldo_principal",
+        "puntaje"  # ← ESTA ES LA CLAVE
+    ]
+
+    existing_leakage = [col for col in leakage_columns if col in df.columns]
+
+    print("\nCOLUMNAS EXCLUIDAS POR DATA LEAKAGE:")
+    for col in existing_leakage:
+        print(f"  - {col}")
+
     y = df[target_col].copy()
-    X = df.drop(columns=[target_col]).copy()
 
-    print("Features (X): %d columnas" % X.shape[1])
-    print("Target (y): '%s' - Balance: %s" % (target_col, y.value_counts().to_dict()))
+    X = df.drop(columns=existing_leakage).copy()
+
+    print("\nCOLUMNAS USADAS COMO FEATURES:")
+    for col in X.columns:
+        print(f"  - {col}")
+
+    print(f"\nFeatures (X): {X.shape[1]} columnas")
+    print(f"Target (y): '{target_col}' - Balance: {y.value_counts().to_dict()}")
+
     return X, y
-
 
 # ===============================================================================
 # 4. VALIDACIÓN DE CALIDAD DE DATOS

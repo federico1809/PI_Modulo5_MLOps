@@ -47,10 +47,14 @@ def build_model(model_name: str, use_grid_search: bool = False):
     """
     if model_name == "logistic_regression":
         base_model = LogisticRegression(
+            C=10.0,
+            penalty="l2",
+            class_weight={0: 5, 1: 1},
             max_iter=3000,
             solver="lbfgs",
             random_state=42
         )
+
         if use_grid_search:
             param_grid = {
                 "C": [0.01, 0.1, 1.0, 10.0],
@@ -73,11 +77,17 @@ def build_model(model_name: str, use_grid_search: bool = False):
         )
         if use_grid_search:
             param_grid = {
-                "n_estimators": [100, 200],
-                "max_depth": [5, 10, 15],
-                "min_samples_split": [5, 10],
-                "class_weight": [None, "balanced", {0: 2, 1: 1}, {0: 5, 1: 1}]
+                "n_estimators": [200, 400],
+                "max_depth": [5, 10, 20],
+                "min_samples_split": [5, 20, 50],
+                "class_weight": [
+                    "balanced",
+                    {0: 3, 1: 1},
+                    {0: 5, 1: 1},
+                    {0: 10, 1: 1}
+                ]
             }
+
             return GridSearchCV(
                 base_model,
                 param_grid,
@@ -93,7 +103,6 @@ def build_model(model_name: str, use_grid_search: bool = False):
 
     else:
         raise ValueError(f"Modelo no soportado: {model_name}")
-
 
 # =============================================================================
 # 3. EVALUACION DE MODELOS
@@ -284,8 +293,20 @@ if __name__ == "__main__":
     print("\nEjecutando pipeline de entrenamiento...\n")
 
     # Feature engineering
-    X_train, X_val, X_test, y_train, y_val, y_test = run_ft_engineering()
+    X_train, X_val, X_test, y_train, y_val, y_test, preprocessor = run_ft_engineering()
 
+    df_debug = X_train.copy()
+    df_debug["target"] = y_train.values
+
+    print("\nCORRELACIONES CON EL TARGET (TRAIN):")
+    correlations = (
+        df_debug
+        .corr(numeric_only=True)["target"]
+        .abs()
+        .sort_values(ascending=False)
+    )
+
+    print(correlations.head(15))
 
     # Modelos a evaluar
     model_list = [
