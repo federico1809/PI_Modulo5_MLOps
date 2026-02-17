@@ -284,7 +284,8 @@ if __name__ == "__main__":
     print("\nEjecutando pipeline de entrenamiento...\n")
 
     # Feature engineering
-    X_train, X_test, y_train, y_test, _ = run_ft_engineering()
+    X_train, X_val, X_test, y_train, y_val, y_test = run_ft_engineering()
+
 
     # Modelos a evaluar
     model_list = [
@@ -296,10 +297,11 @@ if __name__ == "__main__":
     results_df = train_and_evaluate_models(
         X_train,
         y_train,
-        X_test,
-        y_test,
+        X_val,
+        y_val,
         model_list
     )
+
 
     print("\nResultados:")
     print(results_df)
