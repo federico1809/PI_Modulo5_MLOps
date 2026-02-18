@@ -1,66 +1,48 @@
-# =========================
 # Python
-# =========================
 __pycache__/
 *.py[cod]
 *.pyo
 
-# =========================
 # Virtual environments
-# =========================
 venv/
 .venv/
 
-# =========================
 # Jupyter
-# =========================
 .ipynb_checkpoints/
 
-# =========================
 # OS
-# =========================
 .DS_Store
 Thumbs.db
 
-# =========================
 # Secrets
-# =========================
 .env
 *.pem
 
-# =========================
 # Logs
-# =========================
 *.log
 
-# =========================
-# Artifacts (generated)
-# =========================
-artifacts/
+# Model artifacts
 mlops_pipeline/src/artifacts/
+artifacts/
 *.pkl
 *.joblib
 
-# =========================
-# Data to ignore
-# =========================
-Base_de_datos.csv
-*_temp.csv
-*_backup.csv
-
-# =========================
 # Docker
-# =========================
+.dockerignore
 *.tar
 
-# =========================
+# Data
+*.csv
+*.parquet
+
+# AWS
+aws/
+
 # Cache
-# =========================
 .pytest_cache/
 .mypy_cache/
 
-# =========================
 # IDE
-# =========================
 .vscode/
 .idea/
+

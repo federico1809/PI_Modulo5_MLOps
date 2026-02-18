@@ -1,0 +1,12 @@
+[run]
+source = mlops_pipeline/src
+omit =
+    mlops_pipeline/src/tests/*
+    mlops_pipeline/src/**/__pycache__/*
+    mlops_pipeline/src/Cargar_datos.ipynb
+    mlops_pipeline/src/comprension_eda.ipynb
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
