@@ -61,7 +61,7 @@ Base_de_datos.xlsx
     · fit solo en train → transform en val y test
         │
         ├── artifacts/preprocessor.pkl
-        └── Base_de_datos_monitoring.csv ─────────────────────────┐
+        └── Base_de_datos_monitoring.csv ──────────────────────────┐
                                                                    │
         ▼                                                          │
 [2] model_training_evaluation.py                                   │
@@ -290,8 +290,9 @@ Integración con **SonarCloud** via GitHub Actions (`.github/workflows/sonarclou
 ## 8. Estrategia de ramas y versionado
 
 ```
-main        ← versiones estables (merge desde developer vía pull request con aprobación)
-developer   ← desarrollo activo
+main            ← versiones estables (merge desde developer vía pull request con aprobación)
+developer       ← desarrollo activo
+certification   ← desarrollo activo con verificación por pares
 ```
 
 | Versión | Contenido |
