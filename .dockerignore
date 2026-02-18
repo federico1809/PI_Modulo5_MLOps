@@ -1,0 +1,67 @@
+# ============================================================
+# .dockerignore
+# Excluye archivos innecesarios de la imagen Docker
+# ============================================================
+
+# Control de versiones
+.git/
+.gitignore
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Datos crudos (no van en la imagen)
+*.xlsx
+*.xls
+Base_de_datos*.csv
+Base_de_datos_monitoring.csv
+
+# Notebooks y exploración
+*.ipynb
+.ipynb_checkpoints/
+
+# Scripts que no son el deploy
+ft_engineering.py
+model_training_evaluation.py
+model_monitoring.py
+streamlit_dashboard.py
+
+# Outputs de monitoreo (no necesarios en la API)
+artifacts/data_drift_metrics*.csv
+artifacts/monitoring.log
+artifacts/model_results.csv
+artifacts/model_comparison.png
+artifacts/best_params_*.json
+artifacts/best_model_*.pkl
+artifacts/final_best_params_*.json
+
+# Los artefactos que SÍ se incluyen (no ignorar):
+# artifacts/best_model.pkl
+# artifacts/preprocessor.pkl
+
+# Tests y documentación
+tests/
+docs/
+*.md
+*.rst
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Variables de entorno locales
+.env
+.env.*
