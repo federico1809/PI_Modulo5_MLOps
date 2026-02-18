@@ -13,19 +13,33 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
+
       - name: Install dependencies
         run: |
           pip install -r mlops_pipeline/requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        run: |
+          pytest mlops_pipeline/src/tests/ \
+            --cov=mlops_pipeline/src \
+            --cov-report=xml:coverage.xml \
+            --cov-config=mlops_pipeline/.coveragerc \
+            -v
+        continue-on-error: true
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
         continue-on-error: true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
+          projectBaseDir: mlops_pipeline
           args: >
             -Dsonar.organization=datulito
             -Dsonar.projectKey=federico1809_PI_Modulo5_MLOps
