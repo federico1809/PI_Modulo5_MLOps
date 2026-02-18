@@ -95,71 +95,75 @@ app = FastAPI(
 # EXPLICIT FEATURE SCHEMA (Swagger template)
 # ============================================================
 class CreditRiskRecord(BaseModel):
-    tipo_credito: str                  = Field(..., example="consumo")
-    capital_prestado: float            = Field(..., example=15000)
-    plazo_meses: int                   = Field(..., example=36)
-    edad_cliente: int                  = Field(..., example=42)
-    tipo_laboral: str                  = Field(..., example="dependiente")
-    salario_cliente: float             = Field(..., example=85000)
-    total_otros_prestamos: float       = Field(..., example=5000)
-    cuota_pactada: float               = Field(..., example=750)
-    puntaje: float                     = Field(..., example=720)
-    puntaje_datacredito: float         = Field(..., example=710)
-    cant_creditosvigentes: int         = Field(..., example=2)
-    huella_consulta: int               = Field(..., example=1)
-    saldo_mora: float                  = Field(..., example=0)
-    saldo_total: float                 = Field(..., example=14000)
-    saldo_principal: float             = Field(..., example=13000)
-    saldo_mora_codeudor: float         = Field(..., example=0)
-    creditos_sectorFinanciero: int     = Field(..., example=1)
-    creditos_sectorCooperativo: int    = Field(..., example=0)
-    creditos_sectorReal: int           = Field(..., example=0)
-    promedio_ingresos_datacredito: float = Field(..., example=82000)
-    tendencia_ingresos: str            = Field(..., example="estable")
+    tipo_credito: str                    = Field(...,    json_schema_extra={"example": "consumo"})
+    capital_prestado: float              = Field(...,    json_schema_extra={"example": 15000})
+    plazo_meses: int                     = Field(...,    json_schema_extra={"example": 36})
+    edad_cliente: int                    = Field(...,    json_schema_extra={"example": 42})
+    tipo_laboral: str                    = Field(...,    json_schema_extra={"example": "dependiente"})
+    salario_cliente: float               = Field(...,    json_schema_extra={"example": 85000})
+    total_otros_prestamos: float         = Field(...,    json_schema_extra={"example": 5000})
+    cuota_pactada: float                 = Field(...,    json_schema_extra={"example": 750})
+    # LEAKAGE: excluidas en ft_engineering.split_features_target().
+    # El preprocessor NO fue entrenado con estas columnas; se ignoran en prediccion.
+    # Se declaran Optional para no obligar al cliente a enviar datos irrelevantes.
+    puntaje: Optional[float]             = Field(None,   json_schema_extra={"example": 720})
+    puntaje_datacredito: float           = Field(...,    json_schema_extra={"example": 710})
+    cant_creditosvigentes: int           = Field(...,    json_schema_extra={"example": 2})
+    huella_consulta: int                 = Field(...,    json_schema_extra={"example": 1})
+    saldo_mora: Optional[float]          = Field(None,   json_schema_extra={"example": 0})
+    saldo_total: Optional[float]         = Field(None,   json_schema_extra={"example": 14000})
+    saldo_principal: Optional[float]     = Field(None,   json_schema_extra={"example": 13000})
+    saldo_mora_codeudor: Optional[float] = Field(None,   json_schema_extra={"example": 0})
+    creditos_sectorFinanciero: int       = Field(...,    json_schema_extra={"example": 1})
+    creditos_sectorCooperativo: int      = Field(...,    json_schema_extra={"example": 0})
+    creditos_sectorReal: int             = Field(...,    json_schema_extra={"example": 0})
+    promedio_ingresos_datacredito: float = Field(...,    json_schema_extra={"example": 82000})
+    tendencia_ingresos: str              = Field(...,    json_schema_extra={"example": "estable"})
     # Opcion 1: enviar fecha original
     fecha_prestamo: Optional[str] = Field(
         None,
-        example="15/01/2024",
-        description="Formato DD/MM/YYYY"
+        description="Formato DD/MM/YYYY",
+        json_schema_extra={"example": "15/01/2024"}
     )
     # Opcion 2: enviar derivadas directamente
-    fecha_prestamo_year: Optional[int]    = Field(None, example=2024)
-    fecha_prestamo_month: Optional[int]   = Field(None, example=1)
-    fecha_prestamo_weekday: Optional[int] = Field(None, example=0)
+    fecha_prestamo_year:    Optional[int] = Field(None, json_schema_extra={"example": 2024})
+    fecha_prestamo_month:   Optional[int] = Field(None, json_schema_extra={"example": 1})
+    fecha_prestamo_weekday: Optional[int] = Field(None, json_schema_extra={"example": 0})
 # ============================================================
 # REQUEST / RESPONSE SCHEMAS
 # ============================================================
 class PredictionRequest(BaseModel):
     data: List[CreditRiskRecord] = Field(
         ...,
-        example=[
-            {
-                "tipo_credito": "consumo",
-                "capital_prestado": 15000,
-                "plazo_meses": 36,
-                "edad_cliente": 42,
-                "tipo_laboral": "dependiente",
-                "salario_cliente": 85000,
-                "total_otros_prestamos": 5000,
-                "cuota_pactada": 750,
-                "puntaje": 720,
-                "puntaje_datacredito": 710,
-                "cant_creditosvigentes": 2,
-                "huella_consulta": 1,
-                "saldo_mora": 0,
-                "saldo_total": 14000,
-                "saldo_principal": 13000,
-                "saldo_mora_codeudor": 0,
-                "creditos_sectorFinanciero": 1,
-                "creditos_sectorCooperativo": 0,
-                "creditos_sectorReal": 0,
-                "promedio_ingresos_datacredito": 82000,
-                "tendencia_ingresos": "estable",
-                "fecha_prestamo": "15/01/2024"
-            }
-        ]
+        json_schema_extra={
+            "example": [
+                {
+                    "tipo_credito": "consumo",
+                    "capital_prestado": 15000,
+                    "plazo_meses": 36,
+                    "edad_cliente": 42,
+                    "tipo_laboral": "dependiente",
+                    "salario_cliente": 85000,
+                    "total_otros_prestamos": 5000,
+                    "cuota_pactada": 750,
+                    "puntaje": 720,
+                    "puntaje_datacredito": 710,
+                    "cant_creditosvigentes": 2,
+                    "huella_consulta": 1,
+                    "saldo_mora": 0,
+                    "saldo_total": 14000,
+                    "saldo_principal": 13000,
+                    "saldo_mora_codeudor": 0,
+                    "creditos_sectorFinanciero": 1,
+                    "creditos_sectorCooperativo": 0,
+                    "creditos_sectorReal": 0,
+                    "promedio_ingresos_datacredito": 82000,
+                    "tendencia_ingresos": "estable",
+                    "fecha_prestamo": "15/01/2024"
+                }
+            ]
+        }
     )
-    
 class PredictionResponse(BaseModel):
     predictions: List[int] = Field(
         ...,
@@ -224,6 +228,10 @@ def predict(data: List[CreditRiskRecord]) -> List[int]:
                 raise ValueError(
                     f"Faltan features requeridas: {sorted(missing)}"
                 )
+            # Advertir sobre columnas extra que seran descartadas
+            extra = set(df.columns) - set(EXPECTED_FEATURES)
+            if extra:
+                logger.warning("Columnas ignoradas por el preprocessor: %s", sorted(extra))
             # Reordenar columnas segun lo que espera el preprocessor
             df = df[EXPECTED_FEATURES]
         else:

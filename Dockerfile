@@ -34,8 +34,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy API source code and artifacts
 # ============================================================
 
-COPY mlop_pipeline/src/model_deploy.py .
-COPY mlop_pipeline/src/artifacts/ ./artifacts/
+COPY mlops_pipeline/src/model_deploy.py .
+COPY mlops_pipeline/src/artifacts/ ./artifacts/
 
 # ============================================================
 # Expose API port

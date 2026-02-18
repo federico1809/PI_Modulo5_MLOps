@@ -1,349 +1,319 @@
-# Proyecto Integrador — Módulo 5  
-## Pipeline MLOps para Entrenamiento, Selección, Despliegue y Monitoreo de Modelos de Machine Learning
+# Proyecto Integrador — Módulo 5
+## Pipeline MLOps: Predicción de Comportamiento Crediticio
 
-Autor: Federico Ceballos Torres  
-
----
-
-# Descripción General
-
-Este repositorio implementa un pipeline completo de Machine Learning alineado con principios MLOps, diseñado para ser reproducible, versionado y preparado para entornos productivos.
-
-El objetivo del proyecto es construir un sistema robusto para predecir el comportamiento de pago de clientes utilizando técnicas de ingeniería de características, entrenamiento supervisado, optimización de hiperparámetros, despliegue e instrumentación de monitoreo.
-
-El pipeline garantiza:
-
-- Reproducibilidad completa
-- Eliminación de data leakage
-- Separación clara entre entrenamiento e inferencia
-- Persistencia de artefactos
-- Selección automática del mejor modelo
-- Preparación para despliegue en producción
-- Capacidad de monitoreo y detección de drift
+**Autor:** Federico Ceballos Torres
+**Rol simulado:** Científico de Datos Junior Advanced — Equipo de Datos y Analítica, empresa financiera
 
 ---
 
-# Arquitectura del Pipeline
+## 1. Descripción del caso de negocio
 
-El flujo completo sigue la siguiente arquitectura:
+Una entidad financiera necesita anticipar si un cliente pagará su crédito a tiempo (`Pago_atiempo = 1`) o no (`= 0`), utilizando información disponible **al momento del otorgamiento**, sin acceso a datos post-originación como saldos en mora o puntajes internos calculados a posteriori.
 
-Datos crudos  
-→ Feature Engineering  
-→ Split estratificado  
-→ Preprocesamiento persistido  
-→ Entrenamiento de múltiples modelos  
-→ Optimización de hiperparámetros (GridSearchCV)  
-→ Evaluación con métricas especializadas  
-→ Selección automática del mejor modelo  
-→ Persistencia del modelo  
-→ Despliegue  
-→ Monitoreo  
-→ Visualización  
+El dataset contiene registros de créditos históricos con 23 variables (demográficas, financieras y temporales), cubriendo el período **noviembre 2024 — abril 2026**. Tras el proceso de limpieza documentado en el EDA, la base de trabajo quedó en **10.320 registros** (retención del 95.9% sobre los 10.763 originales). La variable objetivo presenta **desbalanceo significativo: ~95% paga a tiempo / ~5% no paga**, lo que orienta todas las decisiones de modelado hacia la detección de la clase minoritaria.
 
-Cada etapa es independiente, modular y reproducible.
+Este repositorio implementa el pipeline completo siguiendo principios MLOps: reproducible, modular, con separación estricta entre entrenamiento e inferencia, y preparado para simular un entorno productivo con API REST, monitoreo de drift y contenerización Docker.
 
 ---
 
-# Estructura del Repositorio
+## 2. Estructura del repositorio
 
 ```
 PI_Modulo5_MLOps/
-│
 ├── .github/
 │   └── workflows/
 │       └── sonarcloud.yml
-│
 ├── mlops_pipeline/
-│   │
 │   ├── src/
-│   │   ├── Cargar_datos.ipynb
-│   │   ├── comprension_eda.ipynb
-│   │   ├── ft_engineering.py
-│   │   ├── model_training_evaluation.py
-│   │   ├── model_deploy.py
-│   │   ├── model_monitoring.py
-│   │   └── monitoring_dashboard.py
-│   │
+│   │   ├── Cargar_datos.ipynb            # Carga y limpieza inicial del dataset
+│   │   ├── comprension_eda.ipynb         # Análisis exploratorio completo (EDA)
+│   │   ├── ft_engineering.py             # Feature engineering y preprocesamiento
+│   │   ├── model_training_evaluation.py  # Entrenamiento, evaluación y selección
+│   │   ├── model_deploy.py               # API REST de inferencia (FastAPI)
+│   │   ├── model_monitoring.py           # Detección de data drift
+│   │   └── monitoring_dashboard.py       # Dashboard de monitoreo (Streamlit)
 │   ├── Base_de_datos.xlsx
 │   ├── requirements.txt
 │   ├── sonar-project.properties
-│   ├── .gitignore
-│   └── README.md
-│
-└── Dockerfile
+│   └── .gitignore
+├── Dockerfile
+└── README.md
 ```
 
-Nota importante:  
-Los artefactos generados (*.pkl, *.joblib, artifacts/) no se versionan y están excluidos mediante `.gitignore`, siguiendo buenas prácticas MLOps.
+> Los artefactos generados en tiempo de ejecución (`artifacts/`) no se versionan. Están excluidos mediante `.gitignore` siguiendo buenas prácticas MLOps: separación entre código y modelo, versionado limpio del repositorio.
 
 ---
 
-# Feature Engineering — ft_engineering.py
+## 3. Flujo del pipeline
 
-Este módulo implementa el pipeline completo de transformación de datos.
-
-Responsabilidades:
-
-- Carga robusta del dataset mediante rutas relativas
-- Separación explícita entre features y target
-- Identificación automática de variables numéricas y categóricas
-- Generación de variables temporales
-- Imputación de valores faltantes
-- Escalado de variables numéricas
-- Codificación OneHot de variables categóricas
-- División estratificada en:
-
-  - Train
-  - Validation
-  - Test
-
-- Persistencia del preprocesador
-
-Garantías:
-
-- Eliminación de data leakage
-- Consistencia entre entrenamiento e inferencia
-- Reproducibilidad completa
-
-Salida del módulo:
+El pipeline está diseñado para ejecutarse en orden. Cada módulo produce salidas que consume el siguiente:
 
 ```
-X_train, X_val, X_test, y_train, y_val, y_test, preprocessor
+Base_de_datos.xlsx
+        │
+        ▼
+[1] ft_engineering.py
+    · Ordenamiento cronológico del dataset
+    · Exclusión de variables con data leakage (post-originación)
+    · Derivación de features temporales desde fecha_prestamo
+    · Split cronológico 70 / 15 / 15 (train / val / test)
+    · Pipelines de transformación por tipo de variable
+    · fit solo en train → transform en val y test
+        │
+        ├── artifacts/preprocessor.pkl
+        └── Base_de_datos_monitoring.csv ──────────────────────────┐
+                                                                   │
+        ▼                                                          │
+[2] model_training_evaluation.py                                   │
+    · GridSearchCV con TimeSeriesSplit(n_splits=5)                 │
+    · Modelos: Logistic Regression, Random Forest                  │
+    · Optimización orientada a recall clase 0 (morosos)            │
+    · Evaluación en validación, selección del mejor modelo         │
+        │                                                          │
+        ├── artifacts/best_model.pkl                               │
+        ├── artifacts/best_params_{model}.json                     │
+        └── artifacts/model_results.csv                            │
+                                                                   │
+        ▼                                                          │
+[3] model_deploy.py  (FastAPI)                                     │
+    · Carga best_model.pkl + preprocessor.pkl al iniciar           │
+    · Valida schema del payload (Pydantic)                         │
+    · Maneja fecha_prestamo → derivación automática                │
+    · Expone POST /credit-risk/predict                             │
+    · Compatible con Docker                                        │
+                                                                   │
+        ▼                                                          │
+[4] model_monitoring.py  ◄─────────────────────────────────────────┘
+    · Lee Base_de_datos_monitoring.csv
+    · Split baseline / current con cutoff_date_train
+      (leído desde artifacts de ft_engineering)
+    · Calcula métricas de drift por variable:
+        - KS test, PSI, Jensen-Shannon (numéricas)
+        - Chi-cuadrado (categóricas)
+    · Exporta artifacts/data_drift_metrics.csv
+        │
+        ▼
+[5] monitoring_dashboard.py  (Streamlit)
+    · Visualiza data_drift_metrics.csv
+    · Clasificación de drift: bajo / moderado / alto
+    · Gráficos PSI, KS, Jensen-Shannon, Chi-cuadrado
+    · Descarga de métricas en CSV
 ```
 
----
-
-# Entrenamiento y Evaluación — model_training_evaluation.py
-
-Este módulo implementa el pipeline de entrenamiento, optimización y selección de modelos.
-
-Modelos soportados:
-
-- Logistic Regression
-- Random Forest
-
-Optimización mediante:
-
-GridSearchCV con validación cruzada estratificada.
-
-Optimización específica para datos desbalanceados utilizando:
-
-```
-class_weight = {0: 5, 1: 1}
-```
-
-Métrica principal de selección:
-
-```
-recall_class_0
-```
-
-Esto permite optimizar la detección de la clase minoritaria (clientes que no pagan a tiempo).
+**Decisión de diseño clave — split cronológico:** Se usa ordenamiento temporal en lugar de aleatorio para respetar la naturaleza secuencial del negocio crediticio y evitar data leakage temporal. El mismo punto de corte (`cutoff_date_train`) se propaga desde `ft_engineering` hacia `model_monitoring` y `monitoring_dashboard`, garantizando que baseline = train y current = val+test en todos los módulos.
 
 ---
 
-# Métricas evaluadas
+## 4. Componentes en detalle
 
-Se calculan métricas generales y específicas por clase:
+### 4.1 `Cargar_datos.ipynb` — Carga y limpieza inicial
 
-Generales:
+Carga el dataset desde `Base_de_datos.xlsx` y ejecuta el primer ciclo de limpieza:
 
-- Accuracy
-- Precision (weighted)
-- Recall (weighted)
-- F1-score (weighted)
-- ROC-AUC
+- Eliminación de registros sin `puntaje_datacredito` (variable crítica para el modelo)
+- Imputación en cero para variables de saldo (`saldo_mora`, `saldo_total`, `saldo_principal`, `saldo_mora_codeudor`), interpretando nulos como ausencia de deuda
+- Imputación con mediana para `promedio_ingresos_datacredito` (robusta ante outliers)
+- Creación de categoría `"Desconocido"` para `tendencia_ingresos`
+- Normalización de nombres de columnas (lowercase, sin espacios)
+- Conversión de tipos: `fecha_prestamo` → datetime, variables categóricas → category, `pago_atiempo` → int
 
-Críticas para negocio:
-
-- Precision clase 0
-- Recall clase 0
-- F1-score clase 0
-
-Esto garantiza evaluación correcta en escenarios con desbalanceo severo.
+**Dataset resultante:** 10.757 registros × 23 columnas (antes del filtrado de outliers del EDA).
 
 ---
 
-# Persistencia de Artefactos
+### 4.2 `comprension_eda.ipynb` — Análisis exploratorio
 
-Los siguientes artefactos se generan localmente:
+EDA completo con análisis univariable, bivariable y multivariable. Los hallazgos de este notebook justifican directamente las decisiones de diseño del pipeline productivo.
 
-- Modelo entrenado (.pkl)
-- Mejores hiperparámetros (.json)
-- Métricas (.csv)
-- Preprocesador (.joblib)
+**Hallazgos principales:**
 
-Estos artefactos no se suben al repositorio por diseño, siguiendo principios MLOps.
+- **Depuración de outliers:** Filtrado de edades fuera del rango lógico (se detectaron valores de hasta 123 años), clipping del top 1% de salarios y préstamos, corrección de puntajes negativos. Dataset final: **10.320 registros** (retención del 95.9%).
 
-Beneficios:
+- **Predictores clave identificados:** `edad_cliente` y `puntaje_datacredito` son los diferenciadores más claros entre clases. A mayor madurez y score, menor probabilidad de mora.
 
-- Separación entre código y modelo
-- Versionado limpio
-- Evita conflictos y archivos pesados en Git
+- **Segmentación de riesgo por producto:** El **Tipo de Crédito 6** presenta una tasa de incumplimiento atípica (~45%), lo que justifica tratamiento diferenciado en la validación del pipeline.
 
----
+- **Multicolinealidad:** Correlación alta (0.71) entre `cuota_pactada` y `capital_prestado`, y entre `salario_cliente` y `total_otros_prestamos`. Se optó por conservar ambas variables y delegar el manejo a modelos robustos ante colinealidad (Random Forest).
 
-# Despliegue — model_deploy.py
+- **No linealidad:** El solapamiento de clases en los diagramas de dispersión confirma que no existe frontera lineal simple, justificando el uso de modelos de ensamble.
 
-Prepara el modelo para inferencia en producción.
-
-Pipeline de inferencia:
-
-Entrada  
-→ Preprocesador persistido  
-→ Modelo entrenado  
-→ Predicción  
-
-Diseñado para integración con:
-
-- FastAPI
-- Docker
-- Sistemas productivos
+- **Variables excluidas como leakage:** `puntaje`, `saldo_mora`, `saldo_mora_codeudor`, `saldo_total`, `saldo_principal` son variables post-originación — se calculan o actualizan *después* de otorgar el crédito, por lo que no están disponibles al momento de la decisión.
 
 ---
 
-# Monitoreo — model_monitoring.py
+### 4.3 `ft_engineering.py` — Feature engineering
 
-Permite monitorear el comportamiento del modelo en producción.
+Implementa el pipeline de transformación reproducible a partir de los hallazgos del EDA.
 
-Incluye:
+**Pipeline de transformación por tipo:**
 
-- Seguimiento de predicciones
-- Preparación para detección de drift
-- Registro de métricas operativas
+| Tipo | Variables | Transformaciones |
+|---|---|---|
+| Numéricas (16) | capital, salario, plazo, edad, cuotas, etc. | Imputación mediana → Winsorizer (p5–p95) → RobustScaler |
+| Ordinal (1) | `tendencia_ingresos` | Imputación moda → OrdinalEncoder (Decreciente / Estable / Creciente) → RobustScaler |
+| Nominales (2) | `tipo_laboral`, `tipo_credito` | Imputación moda → OneHotEncoder |
 
-Permite detectar degradación del modelo.
-
----
-
-# Dashboard — monitoring_dashboard.py
-
-Permite visualizar métricas operativas del modelo.
-
-Preparado para integración con Streamlit.
-
-Permite:
-
-- Inspección de performance
-- Seguimiento temporal
-- Diagnóstico operativo
+**Salidas:** `artifacts/preprocessor.pkl`, `Base_de_datos_monitoring.csv`.
 
 ---
 
-# Dockerización
+### 4.4 `model_training_evaluation.py` — Entrenamiento y selección
 
-El proyecto incluye un Dockerfile que permite ejecutar el pipeline en entornos aislados.
+**Modelos evaluados:** Logistic Regression y Random Forest.
 
-Beneficios:
+**Validación cruzada:** `TimeSeriesSplit(n_splits=5)` dentro de `GridSearchCV`, respetando el orden temporal para evitar leakage en la búsqueda de hiperparámetros.
 
-- Reproducibilidad completa
-- Portabilidad
-- Consistencia entre entornos
+**Criterio de selección:** `recall_class_0` (detección de morosos), dado el desbalanceo extremo. Un modelo que predice siempre clase 1 alcanza ~95% de accuracy pero recall 0 en la clase que importa al negocio.
 
----
+**Métricas reportadas:** accuracy, precision/recall/F1 ponderados, precision/recall/F1 clase 0, ROC-AUC.
 
-# Calidad de Código — SonarCloud
-
-El proyecto integra análisis estático automático mediante SonarCloud.
-
-Validaciones incluidas:
-
-- Bugs
-- Code smells
-- Seguridad
-- Mantenibilidad
-
-Ejecutado automáticamente mediante GitHub Actions.
-
-Archivo:
-
-```
-.github/workflows/sonarcloud.yml
-```
+**Salidas:** `artifacts/best_model.pkl`, `artifacts/best_params_{model}.json`, `artifacts/model_results.csv`, `artifacts/model_comparison.png`.
 
 ---
 
-# Versionado y Flujo de Trabajo
+### 4.5 `model_deploy.py` — API REST de inferencia
 
-Estrategia de ramas:
+Implementa la inferencia desacoplada del entrenamiento usando **FastAPI + Uvicorn**.
 
-developer → desarrollo activo  
-main → versión estable  
+Los artefactos se cargan una sola vez al iniciar el servidor. El endpoint principal valida el payload, deriva variables temporales si se envía `fecha_prestamo`, y aplica el preprocessor antes de predecir. Las variables de leakage están declaradas como `Optional` en el schema: el cliente no está obligado a enviarlas porque el modelo no las usa.
 
-Flujo:
+**Endpoints:**
 
-1. Desarrollo en developer
-2. Validación
-3. Merge a main
-4. Release versionado
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/health` | Estado del servicio y artefactos cargados |
+| GET | `/model/info` | Features esperadas y metadata del modelo |
+| POST | `/credit-risk/predict` | Predicción batch (una o múltiples filas) |
+
+Interfaz interactiva disponible en `http://127.0.0.1:8000/docs` al levantar el servidor.
 
 ---
 
-# Instalación del Entorno
+### 4.6 `model_monitoring.py` — Detección de data drift
 
-Crear entorno virtual:
+Compara la distribución de features entre **baseline** (datos de entrenamiento) y **current** (validación + test), usando la fecha de corte derivada automáticamente del split de `ft_engineering`.
 
-```
+**Métricas calculadas:**
+
+| Métrica | Variables | Referencia |
+|---|---|---|
+| KS statistic | Numéricas | > 0.10 → alerta |
+| PSI | Numéricas | > 0.10 moderado / > 0.20 alto |
+| Jensen-Shannon divergence | Numéricas | > 0.10 → alerta |
+| Chi-cuadrado | Categóricas | magnitud relativa |
+
+**Salida:** `artifacts/data_drift_metrics.csv` con una fila por feature, incluyendo tamaños de muestra, proporción de NaN y advertencias.
+
+---
+
+### 4.7 `monitoring_dashboard.py` — Dashboard Streamlit
+
+Visualiza el CSV de métricas. Incluye clasificación de drift por feature (bajo / moderado / alto), gráficos comparativos PSI/KS/Jensen-Shannon para numéricas y chi-cuadrado para categóricas, análisis de valores nulos baseline vs current, y descarga del reporte en CSV.
+
+---
+
+## 5. Instalación y ejecución
+
+**Requisitos:** Python 3.11 (imagen base del Dockerfile)
+
+```bash
+# 1. Clonar el repositorio
+git clone https://github.com/federico1809/PI_Modulo5_MLOps.git
+cd PI_Modulo5_MLOps
+
+# 2. Crear y activar entorno virtual
 python -m venv .venv
-```
 
-Activar entorno:
+# Windows
+.\.venv\Scripts\Activate.ps1
+# Linux / macOS
+source .venv/bin/activate
 
-Windows:
-
-```
-.venv\Scripts\activate
-```
-
-Instalar dependencias:
-
-```
+# 3. Instalar dependencias
 pip install -r mlops_pipeline/requirements.txt
 ```
 
----
+**Ejecutar el pipeline** (desde la raíz del proyecto):
 
-# Ejecución del Pipeline
-
-Ejecutar desde la raíz del repositorio:
-
-```
+```bash
+# Entrenamiento (incluye feature engineering automáticamente)
 python mlops_pipeline/src/model_training_evaluation.py
+
+# API de inferencia
+python mlops_pipeline/src/model_deploy.py
+# → Interfaz interactiva en http://127.0.0.1:8000/docs
+
+# Monitoreo de drift
+python mlops_pipeline/src/model_monitoring.py
+
+# Dashboard de monitoreo
+streamlit run mlops_pipeline/src/monitoring_dashboard.py
+# → http://localhost:8501
 ```
 
-Esto ejecutará automáticamente:
+**Con Docker** (expone la API en puerto 8000, los artefactos se copian en la imagen):
 
-- Feature Engineering
-- Entrenamiento
-- Optimización
-- Evaluación
-- Selección del mejor modelo
-- Persistencia del modelo
+```bash
+docker build -t mlops-credit-risk .
+docker run -p 8000:8000 mlops-credit-risk
+```
 
----
-
-# Principios MLOps Aplicados
-
-Este proyecto implementa principios fundamentales de MLOps:
-
-- Reproducibilidad
-- Eliminación de data leakage
-- Separación entrenamiento/inferencia
-- Persistencia de artefactos
-- Versionado profesional
-- Modularidad
-- Observabilidad
-- Preparación para producción
+> **Nota:** El Dockerfile copia `artifacts/` dentro de la imagen en tiempo de build. Es necesario haber ejecutado el pipeline de entrenamiento localmente al menos una vez antes de construir la imagen.
 
 ---
 
-# Estado del Proyecto
+## 6. Dependencias principales
 
-Pipeline completamente funcional y alineado con buenas prácticas MLOps.
+| Librería | Versión | Uso |
+|---|---|---|
+| scikit-learn | 1.4.2 | Modelos, pipelines, GridSearchCV |
+| feature-engine | 1.6.2 | Winsorizer, MeanMedianImputer |
+| pandas | 2.1.4 | Manipulación de datos |
+| numpy | 1.26.4 | Operaciones numéricas |
+| scipy | 1.11.4 | KS test, Jensen-Shannon, Chi-cuadrado |
+| fastapi | 0.128.3 | API REST de inferencia |
+| pydantic | 2.12.5 | Validación de schema del payload |
+| joblib | 1.3.2 | Serialización de artefactos |
+| matplotlib / seaborn | 3.7.5 / 0.13.2 | Visualizaciones |
+| mlflow | 2.16.0 | Tracking de experimentos |
 
-Preparado para:
+Listado completo en `mlops_pipeline/requirements.txt`.
 
-- Despliegue en API
-- Contenerización completa
-- Integración CI/CD
-- Monitoreo productivo
+---
+
+## 7. Calidad de código
+
+Integración con **SonarCloud** via GitHub Actions (`.github/workflows/sonarcloud.yml`). Evalúa automáticamente en cada push: bugs, code smells, vulnerabilidades de seguridad, duplicación y mantenibilidad general. Configuración en `mlops_pipeline/sonar-project.properties`.
+
+---
+
+## 8. Estrategia de ramas y versionado
+
+```
+main        ← versiones estables (merge desde developer vía pull request con aprobación)
+developer   ← desarrollo activo
+```
+
+| Versión | Contenido |
+|---|---|
+| v1.0.0 | Estructura base del repositorio |
+| v1.0.1 | Notebooks EDA (`Cargar_datos`, `comprension_eda`) |
+| v1.1.0 | Feature engineering (`ft_engineering.py`) |
+| v1.1.1 | Entrenamiento y evaluación (`model_training_evaluation.py`) |
+| v1.2.x | Mejoras del pipeline: split cronológico, correcciones de leakage |
+| v1.3.0 | Monitoreo y dashboard (`model_monitoring.py`, `monitoring_dashboard.py`) |
+| v1.4.0 | Despliegue productivo (`model_deploy.py`, Dockerfile) |
+
+---
+
+## 9. Principios MLOps aplicados
+
+| Principio | Implementación concreta |
+|---|---|
+| Reproducibilidad | Split cronológico determinista, `random_state=42`, `cutoff_date` propagado desde `ft_engineering` a todos los módulos |
+| Eliminación de data leakage | Variables post-originación excluidas explícitamente; `fit` solo sobre train; `TimeSeriesSplit` en CV interno |
+| Separación entrenamiento / inferencia | `model_deploy.py` carga artefactos serializados sin importar código de entrenamiento |
+| Trazabilidad | `artifacts` dict con metadatos del split, features, hiperparámetros y fechas de corte exportados junto al modelo |
+| Modularidad | Cada script tiene responsabilidad única y expone funciones reutilizables entre módulos |
+| Observabilidad | Métricas de drift por variable con umbrales explícitos, persistidas y visualizadas en dashboard |
+| Preparación para producción | FastAPI + Uvicorn + Docker; configuración via variables de entorno (`HOST`, `PORT`) |

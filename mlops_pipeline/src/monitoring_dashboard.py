@@ -1,10 +1,10 @@
-# streamlit_dashboard.py
+# monitoring_dashboard.py
 # =============================================================================
 # Dashboard de Model Monitoring
 # Visualiza las metricas de data drift generadas por model_monitoring.py
 #
 # Uso:
-#   streamlit run streamlit_dashboard.py
+#   streamlit run monitoring_dashboard.py
 #
 # Flujo esperado:
 #
@@ -33,11 +33,26 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from model_monitoring import run_monitoring_pipeline, DriftMonitorConfig
+from ft_engineering import run_ft_engineering, build_monitoring_dataset
+
+@st.cache_data(show_spinner=False)
+def get_ft_artifacts() -> dict:
+    """
+    Ejecuta ft_engineering una sola vez por sesión y cachea los artifacts.
+    Garantiza que cutoff_date y data_path sean consistentes con el split real.
+    """
+    _, _, _, _, _, _, artifacts = run_ft_engineering()
+    build_monitoring_dataset(
+        output_path="Base_de_datos_monitoring.csv",
+        target_col="Pago_atiempo",
+        keep_date=True
+    )
+    return artifacts
 # =============================================================================
 # CONFIGURACION
 # =============================================================================
 DEFAULT_METRICS_PATH = os.path.join("artifacts", "data_drift_metrics.csv")
-DEFAULT_DATA_PATH    = "./Base_de_datos_monitoring.csv"
+DEFAULT_DATA_PATH = "Base_de_datos_monitoring.csv"  # generado por ft_engineering.build_monitoring_dataset()
 # Columnas reales del proyecto
 DATETIME_COL = "fecha_prestamo"
 TARGET_COL   = "Pago_atiempo"
@@ -52,17 +67,6 @@ JS_THRESHOLD = 0.1
 # CARGA DE DATOS
 # =============================================================================
 def load_drift_metrics(path: str = DEFAULT_METRICS_PATH) -> pd.DataFrame:
-    """
-    Carga el archivo de metricas de drift generado por model_monitoring.py.
-    Parameters
-    ----------
-    path : str
-        Ruta al CSV de metricas.
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame con las metricas de drift por feature.
-    """
     if not os.path.exists(path):
         raise FileNotFoundError(
             "Archivo de metricas no encontrado en: %s\n"
@@ -71,7 +75,6 @@ def load_drift_metrics(path: str = DEFAULT_METRICS_PATH) -> pd.DataFrame:
     df = pd.read_csv(path)
     if df.empty:
         raise ValueError("El archivo de metricas esta vacio.")
-    # Convertir columnas de fecha si existen
     date_cols = [
         "reference_period_start", "reference_period_end",
         "current_period_start",   "current_period_end"
@@ -84,7 +87,6 @@ def load_drift_metrics(path: str = DEFAULT_METRICS_PATH) -> pd.DataFrame:
 # CLASIFICACION DE NIVEL DE DRIFT
 # =============================================================================
 def classify_psi(value: float) -> str:
-    """Clasifica el nivel de drift segun el PSI."""
     if pd.isna(value):
         return "sin dato"
     if value < PSI_THRESHOLDS["bajo"]:
@@ -92,14 +94,8 @@ def classify_psi(value: float) -> str:
     if value < PSI_THRESHOLDS["moderado"]:
         return "moderado"
     return "alto"
-
 def add_drift_classification(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Agrega columna de clasificacion de drift basada en PSI para numericas
-    y chi-square para categoricas.
-    """
     df = df.copy()
-
     def classify_row(row):
         if row["feature_type"] == "numeric":
             return classify_psi(row.get("psi", np.nan))
@@ -107,16 +103,12 @@ def add_drift_classification(df: pd.DataFrame) -> pd.DataFrame:
         if pd.isna(chi2):
             return "sin dato"
         return "calculado"
-
     df["drift_level"] = df.apply(classify_row, axis=1)
     return df
 # =============================================================================
 # RESUMEN DE METRICAS
 # =============================================================================
 def build_summary(df: pd.DataFrame) -> dict:
-    """
-    Construye un resumen de alto nivel del estado del monitoreo.
-    """
     summary = {
         "total_features":        len(df),
         "features_numericas":    (df["feature_type"] == "numeric").sum(),
@@ -136,10 +128,6 @@ def build_summary(df: pd.DataFrame) -> dict:
 # VISUALIZACIONES
 # =============================================================================
 def plot_psi_ranking(df: pd.DataFrame, top_n: int = 15):
-    """
-    Grafico de barras horizontal con el PSI de las features numericas,
-    ordenado de mayor a menor.
-    """
     numeric_df = df[df["feature_type"] == "numeric"].copy()
     numeric_df = numeric_df.dropna(subset=["psi"])
     if numeric_df.empty:
@@ -164,11 +152,7 @@ def plot_psi_ranking(df: pd.DataFrame, top_n: int = 15):
     ax.legend(fontsize=8)
     fig.tight_layout()
     return fig
-
 def plot_ks_ranking(df: pd.DataFrame, top_n: int = 15):
-    """
-    Grafico de barras horizontal con el estadistico KS de las features numericas.
-    """
     numeric_df = df[df["feature_type"] == "numeric"].copy()
     numeric_df = numeric_df.dropna(subset=["ks_stat"])
     if numeric_df.empty:
@@ -185,11 +169,7 @@ def plot_ks_ranking(df: pd.DataFrame, top_n: int = 15):
     ax.legend(fontsize=8)
     fig.tight_layout()
     return fig
-
 def plot_chi2_ranking(df: pd.DataFrame, top_n: int = 15):
-    """
-    Grafico de barras horizontal con el chi-square de las features categoricas.
-    """
     cat_df = df[df["feature_type"] == "categorical"].copy()
     cat_df = cat_df.dropna(subset=["chi_square"])
     if cat_df.empty:
@@ -201,11 +181,7 @@ def plot_chi2_ranking(df: pd.DataFrame, top_n: int = 15):
     ax.set_xlabel("Chi-square statistic")
     fig.tight_layout()
     return fig
-
 def plot_nan_heatmap(df: pd.DataFrame):
-    """
-    Grafico comparativo de proporcion de NaN entre baseline y current.
-    """
     cols_needed = ["feature", "baseline_nan_pct", "current_nan_pct"]
     if not all(c in df.columns for c in cols_needed):
         return None
@@ -230,18 +206,9 @@ def plot_nan_heatmap(df: pd.DataFrame):
     fig.tight_layout()
     return fig
 # =============================================================================
-# SECCIONES DEL DASHBOARD (extraídas para reducir Cognitive Complexity)
+# SECCIONES DEL DASHBOARD
 # =============================================================================
 def _render_sidebar() -> tuple:
-    """
-    Renderiza el sidebar completo y retorna los parámetros de configuración.
-    El input de metrics_path se maneja en run_dashboard() porque se comparte
-    con load_drift_metrics() y _render_run_button().
-    Returns
-    -------
-    tuple
-        (top_n, show_warnings, data_path_input, cutoff_date_input, append_mode)
-    """
     st.sidebar.header("Configuracion")
     top_n = st.sidebar.slider(
         "Top N features a mostrar en graficos",
@@ -256,24 +223,24 @@ def _render_sidebar() -> tuple:
         "Ruta al dataset de monitoreo",
         DEFAULT_DATA_PATH
     )
-    cutoff_date_input = st.sidebar.date_input(
-        "Fecha de corte",
-        value=pd.Timestamp("2025-06-30")
-    )
+    # FIX: cutoff_date leída desde artifacts de ft_engineering,
+    # consistente con el split real del modelo (70% train).
+    # Se muestra como referencia pero no es editable para evitar
+    # que el usuario elija una fecha fuera del rango del dataset.
+    ft_artifacts = get_ft_artifacts()
+    cutoff_date_from_pipeline = ft_artifacts["split_config"]["cutoff_date_train"]
+    st.sidebar.info("Fecha de corte (desde pipeline): %s" % cutoff_date_from_pipeline)
+    cutoff_date_input = cutoff_date_from_pipeline
     append_mode = st.sidebar.checkbox(
         "Modo append (acumular histórico)", value=True
     )
     return top_n, show_warnings, data_path_input, cutoff_date_input, append_mode
-
 def _render_run_button(
     data_path_input: str,
     metrics_path: str,
     cutoff_date_input,
     append_mode: bool
 ) -> None:
-    """
-    Renderiza el botón de ejecución del monitoreo y gestiona su acción.
-    """
     if st.sidebar.button("Ejecutar monitoreo", type="primary"):
         with st.spinner("Calculando métricas de drift..."):
             try:
@@ -296,11 +263,7 @@ def _render_run_button(
                 st.rerun()
             except Exception as e:
                 st.sidebar.error("Error al ejecutar el monitoreo: %s" % e)
-
 def _render_summary_section(df: pd.DataFrame) -> None:
-    """
-    Renderiza la sección de resumen general con métricas clave.
-    """
     st.header("Resumen")
     summary = build_summary(df)
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -314,11 +277,7 @@ def _render_summary_section(df: pd.DataFrame) -> None:
             "Fecha de corte: %s  |  Última ejecución: %s"
             % (summary["cutoff_date"], summary.get("ultima_ejecucion", "N/D"))
         )
-
 def _render_period_section(df: pd.DataFrame) -> None:
-    """
-    Renderiza la sección de periodos analizados (baseline vs current).
-    """
     period_cols = [
         "reference_period_start", "reference_period_end",
         "current_period_start",   "current_period_end"
@@ -340,11 +299,7 @@ def _render_period_section(df: pd.DataFrame) -> None:
             row["current_period_end"].strftime("%Y-%m-%d")
         )
     )
-
 def _render_numeric_drift_section(df: pd.DataFrame, top_n: int) -> None:
-    """
-    Renderiza la sección de drift para variables numéricas (PSI, KS, JS).
-    """
     st.header("Drift - Variables numéricas")
     tab_psi, tab_ks, tab_js = st.tabs(["PSI", "KS Statistic", "Jensen-Shannon"])
     with tab_psi:
@@ -375,11 +330,7 @@ def _render_numeric_drift_section(df: pd.DataFrame, top_n: int) -> None:
             )
         else:
             st.info("No hay datos de Jensen-Shannon disponibles.")
-
 def _render_table_and_warnings(df: pd.DataFrame, show_warnings: bool) -> None:
-    """
-    Renderiza la tabla completa de métricas y la sección de advertencias.
-    """
     st.header("Tabla completa de métricas")
     display_cols = [
         "feature", "feature_type", "drift_level",
@@ -421,39 +372,25 @@ def run_dashboard():
     )
     st.title("Model Monitoring Dashboard")
     st.caption("Visualizacion de metricas de data drift generadas por model_monitoring.py")
-
-    # metrics_path se define aquí porque se comparte entre:
-    # - load_drift_metrics() para leer el CSV
-    # - _render_run_button() para saber dónde guardar las métricas nuevas
     metrics_path = st.sidebar.text_input(
         "Ruta al CSV de metricas",
         DEFAULT_METRICS_PATH
     )
-
-    # Sidebar: resto de configuración (sin metrics_path, que ya está arriba)
     top_n, show_warnings, data_path_input, cutoff_date_input, append_mode = (
         _render_sidebar()
     )
     _render_run_button(data_path_input, metrics_path, cutoff_date_input, append_mode)
-
-    # Carga de datos
     try:
         df = load_drift_metrics(metrics_path)
     except (FileNotFoundError, ValueError) as e:
         st.error(str(e))
         st.stop()
-
     df = add_drift_classification(df)
-
-    # Secciones del dashboard
     _render_summary_section(df)
     _render_period_section(df)
     st.divider()
-
     _render_numeric_drift_section(df, top_n)
     st.divider()
-
-    # Drift - Variables categóricas
     st.header("Drift - Variables categóricas")
     fig = plot_chi2_ranking(df, top_n=top_n)
     if fig:
@@ -461,8 +398,6 @@ def run_dashboard():
     else:
         st.info("No hay variables categóricas o no se pudo calcular chi-square.")
     st.divider()
-
-    # Valores nulos
     st.header("Proporción de valores nulos")
     fig = plot_nan_heatmap(df)
     if fig:
@@ -470,10 +405,7 @@ def run_dashboard():
     else:
         st.info("No se detectaron valores nulos en ninguna feature.")
     st.divider()
-
     _render_table_and_warnings(df, show_warnings)
-
-    # Descarga del CSV
     st.divider()
     st.download_button(
         label="Descargar métricas como CSV",

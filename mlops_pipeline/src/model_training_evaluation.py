@@ -7,10 +7,9 @@ import pandas as pd
 import numpy as np
 import json
 import matplotlib.pyplot as plt
-
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -20,28 +19,22 @@ from sklearn.metrics import (
     classification_report,
     confusion_matrix
 )
-
 from ft_engineering import run_ft_engineering
-
 # =============================================================================
 # 1. CONFIGURACION
 # =============================================================================
 ARTIFACTS_PATH = "artifacts"
 MODEL_PATH = os.path.join(ARTIFACTS_PATH, "best_model.pkl")
 os.makedirs(ARTIFACTS_PATH, exist_ok=True)
-
-
 # =============================================================================
 # 2. CONSTRUCCION DE MODELOS
 # =============================================================================
 def build_model(model_name: str, use_grid_search: bool = False):
     """
     Construye modelo con hiperparametros optimizados para datos desbalanceados.
-
     Args:
         model_name: Nombre del modelo
         use_grid_search: Si True, retorna GridSearchCV
-
     Returns:
         Modelo o GridSearchCV configurado
     """
@@ -54,7 +47,6 @@ def build_model(model_name: str, use_grid_search: bool = False):
             solver="lbfgs",
             random_state=42
         )
-
         if use_grid_search:
             param_grid = {
                 "C": [0.01, 0.1, 1.0, 10.0],
@@ -64,12 +56,11 @@ def build_model(model_name: str, use_grid_search: bool = False):
             return GridSearchCV(
                 base_model,
                 param_grid,
-                cv=5,
+                cv=TimeSeriesSplit(n_splits=5),
                 scoring="roc_auc",
                 n_jobs=-1
             )
         return base_model
-
     elif model_name == "random_forest":
         base_model = RandomForestClassifier(
             random_state=42,
@@ -87,11 +78,10 @@ def build_model(model_name: str, use_grid_search: bool = False):
                     {0: 10, 1: 1}
                 ]
             }
-
             return GridSearchCV(
                 base_model,
                 param_grid,
-                cv=5,
+                cv=TimeSeriesSplit(n_splits=5),
                 scoring="roc_auc",
                 n_jobs=-1
             )
@@ -100,10 +90,8 @@ def build_model(model_name: str, use_grid_search: bool = False):
             base_model.max_depth = 10
             base_model.min_samples_split = 5
             return base_model
-
     else:
         raise ValueError(f"Modelo no soportado: {model_name}")
-
 # =============================================================================
 # 3. EVALUACION DE MODELOS
 # =============================================================================
@@ -113,7 +101,6 @@ def evaluate_model(model, X_test, y_test) -> dict:
     Incluye metricas por clase para datos desbalanceados.
     """
     y_pred = model.predict(X_test)
-
     # Metricas generales (pueden ser enganosas con desbalanceo)
     metrics = {
         "accuracy": accuracy_score(y_test, y_pred),
@@ -121,20 +108,15 @@ def evaluate_model(model, X_test, y_test) -> dict:
         "recall_weighted": recall_score(y_test, y_pred, average="weighted"),
         "f1_weighted": f1_score(y_test, y_pred, average="weighted")
     }
-
     # Metricas especificas para CLASE 0 (morosos) - LO MAS IMPORTANTE
     metrics["precision_class_0"] = precision_score(y_test, y_pred, pos_label=0, zero_division=0)
     metrics["recall_class_0"] = recall_score(y_test, y_pred, pos_label=0, zero_division=0)
     metrics["f1_class_0"] = f1_score(y_test, y_pred, pos_label=0, zero_division=0)
-
     # ROC AUC
     if hasattr(model, "predict_proba"):
         y_proba = model.predict_proba(X_test)[:, 1]
         metrics["roc_auc"] = roc_auc_score(y_test, y_proba)
-
     return metrics
-
-
 # =============================================================================
 # 4. ENTRENAMIENTO Y EVALUACION
 # =============================================================================
@@ -143,12 +125,10 @@ def train_and_evaluate_models(X_train, y_train, X_test, y_test, model_names):
     Entrena y evalua multiples modelos.
     """
     results = []
-
     for name in model_names:
         print(f"\nEntrenando modelo: {name}")
         model = build_model(name, use_grid_search=True)
         model.fit(X_train, y_train)
-
         if isinstance(model, GridSearchCV):
             best_model = model.best_estimator_
             best_params = model.best_params_
@@ -162,33 +142,25 @@ def train_and_evaluate_models(X_train, y_train, X_test, y_test, model_names):
         else:
             best_model = model
             best_params = None
-
         joblib.dump(
             best_model,
             os.path.join(ARTIFACTS_PATH, f"best_model_{name}.pkl")
         )
-
         metrics = evaluate_model(best_model, X_test, y_test)
         metrics["model"] = name
         results.append(metrics)
-
     return pd.DataFrame(results)
-
-
 # =============================================================================
 # 5. SELECCION DEL MEJOR MODELO
 # =============================================================================
 def select_best_model(results_df: pd.DataFrame, metric: str = "recall_class_0") -> str:
     """
     Selecciona el mejor modelo segun una metrica.
-
     Para datos desbalanceados, se prioriza recall_class_0 para detectar
     la clase minoritaria (clientes que NO pagan a tiempo).
     """
     best_row = results_df.sort_values(by=metric, ascending=False).iloc[0]
     return best_row["model"]
-
-
 # =============================================================================
 # 6. ENTRENAMIENTO FINAL Y GUARDADO
 # =============================================================================
@@ -199,29 +171,16 @@ def train_and_save_best_model(
     output_path: str = MODEL_PATH
 ):
     """
-    Entrena el mejor modelo usando GridSearch y guarda el estimador final.
+    Carga el modelo ya entrenado en train_and_evaluate_models y lo copia
+    como best_model.pkl. Evita un segundo GridSearch redundante que
+    produce un objeto distinto al que ganó la comparación en validación.
     """
-    print(f"\nEntrenamiento final del modelo: {model_name}")
-    model = build_model(model_name, use_grid_search=True)
-    model.fit(X_train, y_train)
-
-    if isinstance(model, GridSearchCV):
-        best_model = model.best_estimator_
-        best_params = model.best_params_
-        os.makedirs(ARTIFACTS_PATH, exist_ok=True)
-        with open(
-            os.path.join(ARTIFACTS_PATH, f"final_best_params_{model_name}.json"),
-            "w"
-        ) as f:
-            json.dump(best_params, f, indent=4)
-    else:
-        best_model = model
-
+    print(f"\nGuardando modelo final: {model_name}")
+    source_path = os.path.join(ARTIFACTS_PATH, f"best_model_{model_name}.pkl")
+    best_model = joblib.load(source_path)
     joblib.dump(best_model, output_path)
     print(f"Modelo final guardado en: {output_path}")
     return best_model
-
-
 # =============================================================================
 # 7. EXPORTAR RESULTADOS
 # =============================================================================
@@ -231,8 +190,6 @@ def save_results(results_df, path="artifacts/model_results.csv"):
     """
     results_df.to_csv(path, index=False)
     print(f"Resultados guardados en: {path}")
-
-
 # =============================================================================
 # 8. GRAFICOS COMPARATIVOS
 # =============================================================================
@@ -251,7 +208,6 @@ def plot_model_comparison(results_df, save_path="artifacts/model_comparison.png"
     ]
     if "roc_auc" in results_df.columns:
         metrics_cols.append("roc_auc")
-
     results_df.set_index("model")[metrics_cols].plot(
         kind="bar",
         figsize=(12, 6)
@@ -265,8 +221,6 @@ def plot_model_comparison(results_df, save_path="artifacts/model_comparison.png"
     plt.savefig(save_path)
     plt.close()
     print(f"Grafico guardado en: {save_path}")
-
-
 # =============================================================================
 # 9. REPORTE DETALLADO POR CLASE
 # =============================================================================
@@ -284,20 +238,15 @@ def print_final_report(model, X_test, y_test):
         target_names=["No Paga (0)", "Paga (1)"],
         zero_division=0
     ))
-
-
 # =============================================================================
 # 10. EJECUCION PRINCIPAL
 # =============================================================================
 if __name__ == "__main__":
     print("\nEjecutando pipeline de entrenamiento...\n")
-
     # Feature engineering
-    X_train, X_val, X_test, y_train, y_val, y_test, preprocessor = run_ft_engineering()
-
+    X_train, X_val, X_test, y_train, y_val, y_test, artifacts = run_ft_engineering()
     df_debug = X_train.copy()
     df_debug["target"] = y_train.values
-
     print("\nCORRELACIONES CON EL TARGET (TRAIN):")
     correlations = (
         df_debug
@@ -305,15 +254,12 @@ if __name__ == "__main__":
         .abs()
         .sort_values(ascending=False)
     )
-
     print(correlations.head(15))
-
     # Modelos a evaluar
     model_list = [
         "logistic_regression",
         "random_forest"
     ]
-
     # Entrenar y evaluar
     results_df = train_and_evaluate_models(
         X_train,
@@ -322,24 +268,19 @@ if __name__ == "__main__":
         y_val,
         model_list
     )
-
-
     print("\nResultados:")
     print(results_df)
     save_results(results_df)
     plot_model_comparison(results_df)
-
     # Seleccionar mejor modelo
     best_model_name = select_best_model(results_df, metric="recall_class_0")
     print(f"\nMejor modelo: {best_model_name}")
-
     # Entrenar final y guardar
     best_model = train_and_save_best_model(
         best_model_name,
         X_train,
         y_train
     )
-
     # Reporte detallado del mejor modelo
     print("\n" + "=" * 70)
     print("REPORTE DETALLADO DEL MEJOR MODELO")
