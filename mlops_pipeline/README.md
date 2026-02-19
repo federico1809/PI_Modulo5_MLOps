@@ -25,6 +25,12 @@ PI_Modulo5_MLOps/
 │       └── sonarcloud.yml
 ├── mlops_pipeline/
 │   ├── src/
+│   │   ├── tests/
+│   │   │   ├── __init__.py
+│   │   │   ├── test_ft_engineering.py
+│   │   │   ├── test_model_monitoring.py
+│   │   │   ├── test_model_deploy.py
+│   │   │   └── README.md
 │   │   ├── Cargar_datos.ipynb            # Carga y limpieza inicial del dataset
 │   │   ├── comprension_eda.ipynb         # Análisis exploratorio completo (EDA)
 │   │   ├── ft_engineering.py             # Feature engineering y preprocesamiento
@@ -33,11 +39,13 @@ PI_Modulo5_MLOps/
 │   │   ├── model_monitoring.py           # Detección de data drift
 │   │   └── monitoring_dashboard.py       # Dashboard de monitoreo (Streamlit)
 │   ├── Base_de_datos.xlsx
+│   ├── Dockerfile
+│   ├── README.md
 │   ├── requirements.txt
 │   ├── sonar-project.properties
+│   ├── .coveragerc
+│   ├── .dockerignore
 │   └── .gitignore
-├── Dockerfile
-└── README.md
 ```
 
 > Los artefactos generados en tiempo de ejecución (`artifacts/`) no se versionan. Están excluidos mediante `.gitignore` siguiendo buenas prácticas MLOps: separación entre código y modelo, versionado limpio del repositorio.
@@ -128,15 +136,10 @@ EDA completo con análisis univariable, bivariable y multivariable. Los hallazgo
 **Hallazgos principales:**
 
 - **Depuración de outliers:** Filtrado de edades fuera del rango lógico (se detectaron valores de hasta 123 años), clipping del top 1% de salarios y préstamos, corrección de puntajes negativos. Dataset final: **10.320 registros** (retención del 95.9%).
-
 - **Predictores clave identificados:** `edad_cliente` y `puntaje_datacredito` son los diferenciadores más claros entre clases. A mayor madurez y score, menor probabilidad de mora.
-
 - **Segmentación de riesgo por producto:** El **Tipo de Crédito 6** presenta una tasa de incumplimiento atípica (~45%), lo que justifica tratamiento diferenciado en la validación del pipeline.
-
 - **Multicolinealidad:** Correlación alta (0.71) entre `cuota_pactada` y `capital_prestado`, y entre `salario_cliente` y `total_otros_prestamos`. Se optó por conservar ambas variables y delegar el manejo a modelos robustos ante colinealidad (Random Forest).
-
 - **No linealidad:** El solapamiento de clases en los diagramas de dispersión confirma que no existe frontera lineal simple, justificando el uso de modelos de ensamble.
-
 - **Variables excluidas como leakage:** `puntaje`, `saldo_mora`, `saldo_mora_codeudor`, `saldo_total`, `saldo_principal` son variables post-originación — se calculan o actualizan *después* de otorgar el crédito, por lo que no están disponibles al momento de la decisión.
 
 ---
@@ -212,7 +215,29 @@ Visualiza el CSV de métricas. Incluye clasificación de drift por feature (bajo
 
 ---
 
-## 5. Instalación y ejecución
+## 5. Tests unitarios
+
+Suite de 78 tests unitarios distribuidos en tres archivos dentro de `mlops_pipeline/src/tests/`:
+
+| Archivo | Tests | Qué cubre |
+|---|---|---|
+| `test_ft_engineering.py` | 28 | Generación de features temporales, split cronológico, exclusión de leakage, preprocesador |
+| `test_model_monitoring.py` | 28 | Métricas KS, PSI, Jensen-Shannon, Chi-cuadrado, split baseline/current |
+| `test_model_deploy.py` | 22 | Manejo de fechas, validación de schema, endpoints `/health` y `/model/info` |
+
+Todos los tests son unitarios puros — no requieren archivos reales ni modelo entrenado. Los artefactos se mockean con `unittest.mock` para garantizar reproducibilidad en CI/CD.
+
+**Ejecutar localmente:**
+
+```bash
+pytest mlops_pipeline/src/tests/ -v
+# Con reporte de cobertura
+pytest mlops_pipeline/src/tests/ --cov=mlops_pipeline/src --cov-report=term-missing -v
+```
+
+---
+
+## 6. Instalación y ejecución
 
 **Requisitos:** Python 3.11 (imagen base del Dockerfile)
 
@@ -262,7 +287,7 @@ docker run -p 8000:8000 mlops-credit-risk
 
 ---
 
-## 6. Dependencias principales
+## 7. Dependencias principales
 
 | Librería | Versión | Uso |
 |---|---|---|
@@ -281,18 +306,20 @@ Listado completo en `mlops_pipeline/requirements.txt`.
 
 ---
 
-## 7. Calidad de código
+## 8. Calidad de código
 
-Integración con **SonarCloud** via GitHub Actions (`.github/workflows/sonarcloud.yml`). Evalúa automáticamente en cada push: bugs, code smells, vulnerabilidades de seguridad, duplicación y mantenibilidad general. Configuración en `mlops_pipeline/sonar-project.properties`.
+Integración con **SonarCloud** via GitHub Actions (`.github/workflows/sonarcloud.yml`). Evalúa automáticamente en cada push y pull request: bugs, code smells, vulnerabilidades de seguridad, duplicación y mantenibilidad general. Configuración en `mlops_pipeline/sonar-project.properties`.
+
+La cobertura de tests se mide con `pytest-cov` y se reporta a SonarCloud via `coverage.xml`. El resultado del último análisis sobre las ramas principales es: **0 bugs, 0 vulnerabilidades, rating A en todas las dimensiones, 100% de security hotspots revisados.**
 
 ---
 
-## 8. Estrategia de ramas y versionado
+## 9. Estrategia de ramas y versionado
 
 ```
 main            ← versiones estables (merge desde developer vía pull request con aprobación)
 developer       ← desarrollo activo
-certification   ← desarrollo activo con verificación por pares
+certification   ← staging
 ```
 
 | Versión | Contenido |
@@ -301,13 +328,13 @@ certification   ← desarrollo activo con verificación por pares
 | v1.0.1 | Notebooks EDA (`Cargar_datos`, `comprension_eda`) |
 | v1.1.0 | Feature engineering (`ft_engineering.py`) |
 | v1.1.1 | Entrenamiento y evaluación (`model_training_evaluation.py`) |
-| v1.2.x | Mejoras del pipeline: split cronológico, correcciones de leakage |
-| v1.3.0 | Monitoreo y dashboard (`model_monitoring.py`, `monitoring_dashboard.py`) |
-| v1.4.0 | Despliegue productivo (`model_deploy.py`, Dockerfile) |
+| v1.2.0 | Monitoreo, despliegue y documentación técnica |
+| v1.2.1 | Reorganización estructural del repositorio |
+| v1.3.0 | Tests unitarios, cobertura en SonarCloud y all checks passed |
 
 ---
 
-## 9. Principios MLOps aplicados
+## 10. Principios MLOps aplicados
 
 | Principio | Implementación concreta |
 |---|---|
@@ -317,4 +344,5 @@ certification   ← desarrollo activo con verificación por pares
 | Trazabilidad | `artifacts` dict con metadatos del split, features, hiperparámetros y fechas de corte exportados junto al modelo |
 | Modularidad | Cada script tiene responsabilidad única y expone funciones reutilizables entre módulos |
 | Observabilidad | Métricas de drift por variable con umbrales explícitos, persistidas y visualizadas en dashboard |
+| Calidad continua | 78 tests unitarios + SonarCloud en CI/CD con all checks passed en cada merge a main |
 | Preparación para producción | FastAPI + Uvicorn + Docker; configuración via variables de entorno (`HOST`, `PORT`) |
