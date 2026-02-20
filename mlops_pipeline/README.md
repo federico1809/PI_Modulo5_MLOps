@@ -16,7 +16,42 @@ Este repositorio implementa el pipeline completo siguiendo principios MLOps: rep
 
 ---
 
-## 2. Estructura del repositorio
+## 2. Conclusiones y recomendaciones de negocio
+
+### 2.1 Modelo seleccionado y justificación
+
+El modelo seleccionado para producción es **Random Forest**, a pesar de tener menor accuracy global (76%) que la Regresión Logística (96%).
+
+| Métrica | Logistic Regression | Random Forest |
+|---|---|---|
+| Accuracy | 96.1% | 76.0% |
+| Precision weighted | 94.5% | 94.0% |
+| Recall weighted | 96.1% | 76.0% |
+| **Recall clase 0 (morosos)** | **10.2%** | **44.1%** |
+| F1 clase 0 | 16.0% | 11.8% |
+| ROC-AUC | 0.695 | 0.706 |
+
+La Regresión Logística, aunque parece superior en accuracy, clasifica como pagadores puntuales al 90% de los morosos reales — un comportamiento inaceptable en el contexto crediticio donde el costo de un falso negativo (otorgar crédito a quien no pagará) es significativamente mayor que el de un falso positivo (rechazar un buen cliente).
+
+**Random Forest detecta 4,3 veces más morosos** que la Regresión Logística, con un ROC-AUC marginalmente superior (0.706 vs 0.695), lo que lo posiciona como el modelo con mayor valor real para el negocio.
+
+### 2.2 Implicancias estratégicas
+
+**Gestión del riesgo crediticio:** El modelo permite intervenir preventivamente sobre el 44% de los clientes que eventualmente no pagarán, antes de que el crédito entre en mora. En una cartera de 10.000 clientes con tasa de mora del 5%, esto equivale a anticipar ~220 casos de incumplimiento que sin el modelo pasarían inadvertidos hasta el momento del default.
+
+**Segmentación por producto:** El Tipo de Crédito 6 presenta una tasa de incumplimiento del ~45%, muy por encima del promedio general del ~5%. Se recomienda aplicar criterios de aprobación diferenciados para este producto: mayor exigencia en `puntaje_datacredito` y `edad_cliente`, que el EDA identificó como los predictores más discriminantes.
+
+**Perfil de riesgo por cliente:** Clientes con `puntaje_datacredito` bajo y menor `edad_cliente` concentran la mayor probabilidad de mora. Esto sugiere políticas de onboarding más conservadoras para perfiles jóvenes sin historial crediticio consolidado, como montos máximos reducidos o plazos más cortos en una primera operación.
+
+**Monitoreo continuo como palanca de valor:** El pipeline de monitoreo de drift permite detectar cambios en el perfil de la cartera antes de que impacten el desempeño del modelo. Si variables como `salario_cliente` o `capital_prestado` muestran PSI > 0.20, es señal de que el segmento de clientes está cambiando y el modelo debe ser reentrenado con datos más recientes.
+
+### 2.3 Limitaciones y próximos pasos
+
+El modelo actual tiene un recall de clase 0 del 44%, lo que significa que aún deja pasar el 56% de los morosos sin detectar. Para mejorar este número se recomienda explorar técnicas de balanceo de clases (SMOTE, class_weight), umbrales de clasificación ajustables por producto, y la incorporación de variables de comportamiento transaccional si estuvieran disponibles en el DWH de la entidad.
+
+---
+
+## 3. Estructura del repositorio
 
 ```
 PI_Modulo5_MLOps/
@@ -52,7 +87,7 @@ PI_Modulo5_MLOps/
 
 ---
 
-## 3. Flujo del pipeline
+## 4. Flujo del pipeline
 
 El pipeline está diseñado para ejecutarse en orden. Cada módulo produce salidas que consume el siguiente:
 
@@ -112,9 +147,9 @@ Base_de_datos.xlsx
 
 ---
 
-## 4. Componentes en detalle
+## 5. Componentes en detalle
 
-### 4.1 `Cargar_datos.ipynb` — Carga y limpieza inicial
+### 5.1 `Cargar_datos.ipynb` — Carga y limpieza inicial
 
 Carga el dataset desde `Base_de_datos.xlsx` y ejecuta el primer ciclo de limpieza:
 
@@ -129,7 +164,7 @@ Carga el dataset desde `Base_de_datos.xlsx` y ejecuta el primer ciclo de limpiez
 
 ---
 
-### 4.2 `comprension_eda.ipynb` — Análisis exploratorio
+### 5.2 `comprension_eda.ipynb` — Análisis exploratorio
 
 EDA completo con análisis univariable, bivariable y multivariable. Los hallazgos de este notebook justifican directamente las decisiones de diseño del pipeline productivo.
 
@@ -144,7 +179,7 @@ EDA completo con análisis univariable, bivariable y multivariable. Los hallazgo
 
 ---
 
-### 4.3 `ft_engineering.py` — Feature engineering
+### 5.3 `ft_engineering.py` — Feature engineering
 
 Implementa el pipeline de transformación reproducible a partir de los hallazgos del EDA.
 
@@ -160,7 +195,7 @@ Implementa el pipeline de transformación reproducible a partir de los hallazgos
 
 ---
 
-### 4.4 `model_training_evaluation.py` — Entrenamiento y selección
+### 5.4 `model_training_evaluation.py` — Entrenamiento y selección
 
 **Modelos evaluados:** Logistic Regression y Random Forest.
 
@@ -174,7 +209,7 @@ Implementa el pipeline de transformación reproducible a partir de los hallazgos
 
 ---
 
-### 4.5 `model_deploy.py` — API REST de inferencia
+### 5.5 `model_deploy.py` — API REST de inferencia
 
 Implementa la inferencia desacoplada del entrenamiento usando **FastAPI + Uvicorn**.
 
@@ -192,7 +227,7 @@ Interfaz interactiva disponible en `http://127.0.0.1:8000/docs` al levantar el s
 
 ---
 
-### 4.6 `model_monitoring.py` — Detección de data drift
+### 5.6 `model_monitoring.py` — Detección de data drift
 
 Compara la distribución de features entre **baseline** (datos de entrenamiento) y **current** (validación + test), usando la fecha de corte derivada automáticamente del split de `ft_engineering`.
 
@@ -209,13 +244,13 @@ Compara la distribución de features entre **baseline** (datos de entrenamiento)
 
 ---
 
-### 4.7 `monitoring_dashboard.py` — Dashboard Streamlit
+### 5.7 `monitoring_dashboard.py` — Dashboard Streamlit
 
 Visualiza el CSV de métricas. Incluye clasificación de drift por feature (bajo / moderado / alto), gráficos comparativos PSI/KS/Jensen-Shannon para numéricas y chi-cuadrado para categóricas, análisis de valores nulos baseline vs current, y descarga del reporte en CSV.
 
 ---
 
-## 5. Tests unitarios
+## 6. Tests unitarios
 
 Suite de 78 tests unitarios distribuidos en tres archivos dentro de `mlops_pipeline/src/tests/`:
 
@@ -237,7 +272,7 @@ pytest mlops_pipeline/src/tests/ --cov=mlops_pipeline/src --cov-report=term-miss
 
 ---
 
-## 6. Instalación y ejecución
+## 7. Instalación y ejecución
 
 **Requisitos:** Python 3.11 (imagen base del Dockerfile)
 
@@ -287,7 +322,7 @@ docker run -p 8000:8000 mlops-credit-risk
 
 ---
 
-## 7. Dependencias principales
+## 8. Dependencias principales
 
 | Librería | Versión | Uso |
 |---|---|---|
@@ -306,7 +341,7 @@ Listado completo en `mlops_pipeline/requirements.txt`.
 
 ---
 
-## 8. Calidad de código
+## 9. Calidad de código
 
 Integración con **SonarCloud** via GitHub Actions (`.github/workflows/sonarcloud.yml`). Evalúa automáticamente en cada push y pull request: bugs, code smells, vulnerabilidades de seguridad, duplicación y mantenibilidad general. Configuración en `mlops_pipeline/sonar-project.properties`.
 
@@ -314,7 +349,7 @@ La cobertura de tests se mide con `pytest-cov` y se reporta a SonarCloud via `co
 
 ---
 
-## 9. Estrategia de ramas y versionado
+## 10. Estrategia de ramas y versionado
 
 ```
 main            ← versiones estables (merge desde developer vía pull request con aprobación)
@@ -331,10 +366,11 @@ certification   ← staging
 | v1.2.0 | Monitoreo, despliegue y documentación técnica |
 | v1.2.1 | Reorganización estructural del repositorio |
 | v1.3.0 | Tests unitarios, cobertura en SonarCloud y all checks passed |
+| v1.3.1 | Conclusiones de negocio y README final |
 
 ---
 
-## 10. Principios MLOps aplicados
+## 11. Principios MLOps aplicados
 
 | Principio | Implementación concreta |
 |---|---|
